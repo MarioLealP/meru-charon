@@ -3,13 +3,19 @@ name = "charon"
 version = "0.1.0"
 description = "Meru's purge - clears what a retired app left after its retention"
 requires-python = ">=3.15"
-dependencies = []
+dependencies = [
+    "httpx2>=2.16.0",
+    "pydantic>=2.14.2",
+    "pydantic-settings>=2.16.2",
+    "pyyaml>=6.0.3",
+]
 
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.3",
     "ty>=0.0.95",
+    "types-pyyaml>=6.0.12.20261103",
 ]
 
 [tool.uv]
