@@ -7,5 +7,5 @@ name: charon
 owner: mario
 image:
   repository: zot.clockmost.com/meru/charon
-  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  tag: ""
+  digest: sha256:60b34e7d5b5abbd0518d500e63df13439080cf43f27dc14b64e458856095e920
+  tag: "b7289f9117cb"
