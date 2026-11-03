@@ -3,14 +3,10 @@ name = "charon"
 version = "0.1.0"
 description = "Meru's purge - clears what a retired app left after its retention"
 requires-python = ">=3.15"
-dependencies = [
-    "fastapi>=0.162.0",
-    "uvicorn>=0.54.0",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.16.0",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
     "ty>=0.0.95",
