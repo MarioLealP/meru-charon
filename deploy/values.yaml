@@ -13,3 +13,13 @@ image:
 # a pass deletes is in that morning's backup) and when the server is on (a run missed by over an hour is skipped).
 job:
   schedule: "0 11 * * *"
+# Its own token for the cluster (Meru/meru rbac/): list and delete namespaces, read Argo Applications.
+kubernetesApi:
+  enabled: true
+# The bot's token: read-only, on Meru/requests alone.
+secretEnv:
+  CHARON_GITEA_TOKEN:
+    secret: gitea
+    key: token
+externalSecrets:
+  gitea: {}

@@ -1,0 +1,18 @@
+# Test app for D99 (J4): one typed secret, one generated. Approved in the atlas, retired after.
+apiVersion: meru.clockmost.com/v1
+kind: App
+metadata:
+  name: tanuki
+  approvedBy: akadmin
+  removedBy: akadmin
+  removedAt: 2026-11-03T22:15:46Z
+spec:
+  owner: mario
+  description: Secrets test app - one typed, one generated secret
+  route:
+    enabled: false
+  secrets:
+    - name: demo-token
+    - name: session-key
+      generate: true
+  removed: true

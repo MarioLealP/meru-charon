@@ -1,17 +1,11 @@
-import logging
-
 import pytest
 
-from charon.__main__ import main, run
+from charon import __main__ as charon
 
 
-def test_a_pass_with_nothing_to_purge_succeeds(caplog: pytest.LogCaptureFixture):
-    with caplog.at_level(logging.INFO, logger="charon"):
-        assert run() == 0
-    assert "pass done" in caplog.text
-
-
-def test_main_exits_with_the_pass_result():
+@pytest.mark.parametrize("code", [0, 1])
+def test_main_exits_with_the_pass_result(monkeypatch: pytest.MonkeyPatch, code: int):
+    monkeypatch.setattr(charon, "run", lambda: code)
     with pytest.raises(SystemExit) as exited:
-        main()
-    assert exited.value.code == 0
+        charon.main()
+    assert exited.value.code == code

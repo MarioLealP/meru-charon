@@ -1,0 +1,26 @@
+[
+  {
+    "name": "tanuki.yaml",
+    "path": "apps/tanuki.yaml",
+    "sha": "c61968f0beb5cc50bbb5f9a3662406ed63586c79",
+    "last_commit_sha": "15d1fa3859c177cf4a07724fccc3224d2cce005f",
+    "last_committer_date": "2026-11-03T22:23:53Z",
+    "last_author_date": "2026-11-03T22:23:53Z",
+    "type": "file",
+    "mode": "100644",
+    "size": 2346,
+    "encoding": null,
+    "content": null,
+    "target": null,
+    "url": "https://git.clockmost.com/api/v1/repos/Meru/meru/contents/rbac/charon-deletes-retired.yaml?ref=main",
+    "html_url": "https://git.clockmost.com/Meru/meru/src/branch/main/rbac/charon-deletes-retired.yaml",
+    "git_url": "https://git.clockmost.com/api/v1/repos/Meru/meru/git/blobs/c61968f0beb5cc50bbb5f9a3662406ed63586c79",
+    "download_url": "https://git.clockmost.com/Meru/meru/raw/branch/main/rbac/charon-deletes-retired.yaml",
+    "submodule_git_url": null,
+    "_links": {
+      "self": "https://git.clockmost.com/api/v1/repos/Meru/meru/contents/rbac/charon-deletes-retired.yaml?ref=main",
+      "git": "https://git.clockmost.com/api/v1/repos/Meru/meru/git/blobs/c61968f0beb5cc50bbb5f9a3662406ed63586c79",
+      "html": "https://git.clockmost.com/Meru/meru/src/branch/main/rbac/charon-deletes-retired.yaml"
+    }
+  }
+]

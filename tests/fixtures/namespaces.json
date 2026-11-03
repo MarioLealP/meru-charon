@@ -1,0 +1,62 @@
+{
+  "kind": "NamespaceList",
+  "apiVersion": "v1",
+  "metadata": {
+    "resourceVersion": "3150180"
+  },
+  "items": [
+    {
+      "metadata": {
+        "name": "tanuki",
+        "uid": "b8fafb74-ebae-4ba1-8e3b-258863c8c046",
+        "resourceVersion": "3134622",
+        "creationTimestamp": "2026-11-02T10:11:51Z",
+        "labels": {
+          "app.kubernetes.io/part-of": "meru",
+          "kubernetes.io/metadata.name": "tanuki",
+          "meru.clockmost.com/app": "tanuki",
+          "meru.clockmost.com/owner": "mario",
+          "pod-security.kubernetes.io/enforce": "restricted"
+        },
+        "annotations": {
+          "argocd.argoproj.io/sync-options": "ServerSideApply=true",
+          "meru.clockmost.com/removed-at": "2026-11-03T22:15:46Z"
+        }
+      },
+      "spec": {
+        "finalizers": [
+          "kubernetes"
+        ]
+      },
+      "status": {
+        "phase": "Active"
+      }
+    },
+    {
+      "metadata": {
+        "name": "thoth",
+        "uid": "cf74255c-24b0-42b6-b4dc-436638c2c41f",
+        "resourceVersion": "292182",
+        "creationTimestamp": "2026-10-29T15:08:56Z",
+        "labels": {
+          "app.kubernetes.io/part-of": "meru",
+          "kubernetes.io/metadata.name": "thoth",
+          "meru.clockmost.com/app": "thoth",
+          "meru.clockmost.com/owner": "mario",
+          "pod-security.kubernetes.io/enforce": "restricted"
+        },
+        "annotations": {
+          "argocd.argoproj.io/sync-options": "ServerSideApply=true"
+        }
+      },
+      "spec": {
+        "finalizers": [
+          "kubernetes"
+        ]
+      },
+      "status": {
+        "phase": "Active"
+      }
+    }
+  ]
+}
