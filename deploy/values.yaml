@@ -7,8 +7,8 @@ name: charon
 owner: mario
 image:
   repository: zot.clockmost.com/meru/charon
-  digest: sha256:f105569135a891198e37b6fe235b9826182ae834a15cc6957507ffd262940156
-  tag: "0180dac7c4bd"
+  digest: sha256:8f4c2bc0795b8fbe54c545d465f49be590fc16f6fbed236be624a06d6fdf7cff
+  tag: "1bccfaa9a9c2"
 # A daily pass (D107), not a service: a CronJob, no Service, no probes. 11:00 Lisbon - after the 03:15 full backup (what
 # a pass deletes is in that morning's backup) and when the server is on (a run missed by over an hour is skipped).
 job:
