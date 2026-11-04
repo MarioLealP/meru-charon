@@ -18,5 +18,6 @@ class Settings(BaseSettings):
     kubernetes_url: str = "https://kubernetes.default.svc"
     kubernetes_dir: Path = Path("/var/run/meru/kubernetes")  # token, ca.crt
 
-    # Off = a pass only says what it would delete. Stays off until Mario has read a pass's output.
+    # Off = a pass only says what it would delete. Each stays off until Mario has read a pass's output.
     delete_namespaces: bool = False
+    delete_volumes: bool = False
