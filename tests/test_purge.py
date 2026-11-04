@@ -13,6 +13,7 @@ import pytest
 from charon.cluster import REMOVED_AT, Cluster
 from charon.purge import Switches, purge
 from charon.request_files import RequestFiles
+from charon.vault import Vault
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REQUEST = (FIXTURES / "tanuki.yaml").read_text()
@@ -30,6 +31,9 @@ class World:
         self.applications = {"app-thoth"}
         self.deleted: list[tuple[str, dict]] = []
         self.released: list[tuple[str, dict]] = []
+        self.secrets_deleted: list[str] = []
+        self.login: dict = {}
+        self.vault_fails = False
         self.gitea_fails = False
 
     @property
@@ -59,6 +63,17 @@ class World:
             return httpx2.Response(200, json=self.namespaces)
         return httpx2.Response(200 if path.rsplit("/", 1)[1] in self.applications else 404, json={})
 
+    def openbao(self, request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/v1/auth/kubernetes/login":
+            if self.vault_fails:
+                return httpx2.Response(403, json={"errors": ["permission denied"]})
+            self.login = json.loads(request.content)
+            return httpx2.Response(200, json={"auth": {"client_token": "bao-token", "lease_duration": 600}})
+        assert request.method == "DELETE"
+        assert request.headers["X-Vault-Token"] == "bao-token"
+        self.secrets_deleted.append(request.url.path)
+        return httpx2.Response(204)
+
     def namespace_gone(self) -> None:
         self.namespaces["items"] = [i for i in self.namespaces["items"] if i["metadata"]["name"] != "tanuki"]
 
@@ -66,11 +81,13 @@ class World:
     def tanuki_volumes(self) -> list[dict]:
         return [v for v in self.volumes["items"] if v["spec"]["claimRef"]["namespace"] == "tanuki-build"]
 
-    def run(self, delete: bool, now: datetime, volumes: bool = False) -> int:
+    def run(self, delete: bool, now: datetime, volumes: bool = False, secrets: bool = False) -> int:
         gitea = httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.gitea))
         cluster = httpx2.Client(base_url="https://cluster.test", transport=httpx2.MockTransport(self.cluster))
-        switches = Switches(namespaces=delete, volumes=volumes)
-        return purge(RequestFiles(gitea, "Meru/requests"), Cluster(cluster), switches, now)
+        openbao = httpx2.Client(base_url="https://openbao.test", transport=httpx2.MockTransport(self.openbao))
+        switches = Switches(namespaces=delete, volumes=volumes, secrets=secrets)
+        vault = Vault(openbao, "meru-charon-purge", "pod-token")
+        return purge(RequestFiles(gitea, "Meru/requests"), Cluster(cluster), vault, switches, now)
 
 
 @pytest.fixture
@@ -154,12 +171,10 @@ def test_the_build_namespace_goes_with_the_same_checks(world: World):
     assert [name for name, _ in world.deleted] == ["tanuki", "tanuki-build"]
 
 
-def test_a_namespace_outside_meru_is_never_touched(world: World, caplog: pytest.LogCaptureFixture):
+def test_a_namespace_outside_meru_is_never_touched(world: World):
     world.namespace_gone()
-    world.volumes["items"] = []
     assert world.run(delete=True, now=AFTER_RETENTION) == 0
     assert world.deleted == []
-    assert "tanuki: nothing left" in caplog.text
 
 
 def test_a_failed_read_fails_the_pass_and_deletes_nothing(world: World):
@@ -243,3 +258,55 @@ def test_another_apps_volumes_are_never_touched(world: World):
     world.run(delete=False, now=AFTER_RETENTION, volumes=True)
     charon = next(v for v in world.volumes["items"] if v["spec"]["claimRef"]["namespace"] == "charon-build")
     assert charon["metadata"]["name"] not in [name for name, _ in world.released]
+
+
+def test_the_three_entries_go_once_both_namespaces_are_gone(world: World):
+    world.namespace_gone()
+    assert world.run(delete=False, now=AFTER_RETENTION, secrets=True) == 0
+    assert world.login == {"role": "meru-charon-purge", "jwt": "pod-token"}
+    assert world.secrets_deleted == [
+        "/v1/apps/metadata/meru/tanuki/eso/env",
+        "/v1/apps/metadata/meru/tanuki-build/build",
+        "/v1/apps/metadata/meru/tanuki-build/eso/sindri-registration",
+    ]
+
+
+def test_the_secret_switch_off_only_says_so(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    assert world.run(delete=True, now=AFTER_RETENTION, volumes=True, secrets=False) == 0
+    assert world.secrets_deleted == []
+    assert "tanuki secrets: would delete (dry run)" in caplog.text
+
+
+def test_secrets_wait_for_the_retention(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.run(delete=False, now=DURING_RETENTION, secrets=True)
+    assert world.secrets_deleted == []
+    assert "tanuki secrets: kept: retention runs to" in caplog.text
+
+
+def test_secrets_stay_while_a_namespace_exists(world: World, caplog: pytest.LogCaptureFixture):
+    world.run(delete=False, now=AFTER_RETENTION, secrets=True)
+    assert world.secrets_deleted == []
+    assert "tanuki secrets: kept: namespace tanuki still exists" in caplog.text
+
+
+def test_a_living_argo_application_keeps_the_secrets(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.applications.add("app-tanuki")
+    world.run(delete=False, now=AFTER_RETENTION, secrets=True)
+    assert world.secrets_deleted == []
+    assert "tanuki secrets: kept: its Argo Application still exists" in caplog.text
+
+
+def test_an_app_that_was_not_removed_keeps_its_secrets(world: World):
+    world.request = REQUEST.replace("  removed: true\n", "")
+    world.namespace_gone()
+    world.run(delete=False, now=AFTER_RETENTION, secrets=True)
+    assert world.secrets_deleted == []
+
+
+def test_no_login_fails_the_pass_with_the_switch_off(world: World):
+    world.vault_fails = True
+    with pytest.raises(httpx2.HTTPStatusError):
+        world.run(delete=False, now=DURING_RETENTION)
