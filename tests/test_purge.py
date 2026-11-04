@@ -1,6 +1,7 @@
 """The fakes answer from responses captured off the live systems (tests/fixtures): namespaces.json from the cluster,
 volumes.json from the cluster (two Released PVs on tanuki-build's one folder, a Bound one on charon-build's),
-tanuki.yaml from Meru/requests, contents-apps.json is Gitea's directory listing, zot-tags.json and DIGESTS from Zot."""
+tanuki.yaml from Meru/requests, contents-apps.json is Gitea's directory listing, repo-tanuki.json its repo answer,
+zot-tags.json and DIGESTS from Zot."""
 
 import json
 import logging
@@ -13,6 +14,7 @@ import pytest
 from charon.cluster import REMOVED_AT, Cluster
 from charon.purge import Outside, Switches, purge
 from charon.registry import Registry
+from charon.repos import AppRepos
 from charon.request_files import RequestFiles
 from charon.vault import Vault
 
@@ -47,6 +49,8 @@ class World:
         self.delete_auth: list[str] = []
         self.repo_gone = False
         self.zot_refuses = False
+        self.repo = json.loads((FIXTURES / "repo-tanuki.json").read_text())
+        self.repo_status = 200
         self.gitea_fails = False
 
     @property
@@ -103,6 +107,11 @@ class World:
         assert request.method == "HEAD"
         return httpx2.Response(200, headers={"Docker-Content-Digest": DIGESTS[path.rsplit("/", 1)[1]]})
 
+    def anonymous_gitea(self, request: httpx2.Request) -> httpx2.Response:
+        assert "Authorization" not in request.headers
+        assert request.url.path == "/api/v1/repos/Meru/tanuki"
+        return httpx2.Response(self.repo_status, json=self.repo)
+
     def namespace_gone(self) -> None:
         self.namespaces["items"] = [i for i in self.namespaces["items"] if i["metadata"]["name"] != "tanuki"]
 
@@ -122,6 +131,10 @@ class World:
             cluster=Cluster(cluster),
             vault=Vault(openbao, "meru-charon-purge", "pod-token"),
             registry=Registry(zot, "charon", "pw"),
+            repos=AppRepos(
+                httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.anonymous_gitea)),
+                "Meru",
+            ),
         )
         return purge(RequestFiles(gitea, "Meru/requests"), outside, switches, now)
 
@@ -388,3 +401,34 @@ def test_zot_refusing_a_repo_with_its_own_entry_fails_the_pass(world: World):
     world.zot_refuses = True
     assert world.run(delete=False, now=AFTER_RETENTION, images=True) == 1
     assert world.images_deleted == []
+
+
+def test_a_purged_app_reminds_mario_to_archive(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    assert world.run(delete=False, now=AFTER_RETENTION) == 0
+    assert "tanuki repo: not archived, needs Mario's click" in caplog.text
+
+
+def test_no_reminder_during_the_retention(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.run(delete=False, now=DURING_RETENTION)
+    assert "needs Mario's click" not in caplog.text
+
+
+def test_no_reminder_while_a_namespace_exists(world: World, caplog: pytest.LogCaptureFixture):
+    world.run(delete=False, now=AFTER_RETENTION)
+    assert "needs Mario's click" not in caplog.text
+
+
+def test_an_archived_repo_needs_no_reminder(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.repo["archived"] = True
+    world.run(delete=False, now=AFTER_RETENTION)
+    assert "needs Mario's click" not in caplog.text
+
+
+def test_a_repo_that_is_gone_needs_no_reminder(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.repo_status = 404
+    assert world.run(delete=False, now=AFTER_RETENTION) == 0
+    assert "needs Mario's click" not in caplog.text

@@ -16,6 +16,7 @@ from charon.cluster import Cluster
 from charon.config import Settings
 from charon.purge import Outside, Switches, purge
 from charon.registry import Registry
+from charon.repos import AppRepos
 from charon.request_files import RequestFiles
 from charon.vault import Vault
 
@@ -39,6 +40,7 @@ def run() -> int:
             verify=ssl.create_default_context(cafile=settings.openbao_dir / "ca.crt"),
         ) as openbao,
         httpx2.Client(base_url=settings.zot_url) as zot,
+        httpx2.Client(base_url=settings.gitea_url) as anonymous_gitea,
     ):
         vault = Vault(openbao, settings.openbao_role, (settings.openbao_dir / "token").read_text().strip())
         failed = purge(
@@ -47,6 +49,7 @@ def run() -> int:
                 cluster=Cluster(kubernetes),
                 vault=vault,
                 registry=Registry(zot, settings.zot_user, settings.zot_password.get_secret_value()),
+                repos=AppRepos(anonymous_gitea, settings.apps_org),
             ),
             Switches(
                 namespaces=settings.delete_namespaces,

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     gitea_url: str = "https://git.clockmost.com"
     requests_repo: str = "Meru/requests"
     gitea_token: SecretStr
+    apps_org: str = "Meru"
 
     # The cluster, with the pod's own token and CA (nuwa-app kubernetesApi).
     kubernetes_url: str = "https://kubernetes.default.svc"
