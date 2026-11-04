@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from charon.cluster import Cluster, Namespace, Volume
 from charon.registry import Registry
+from charon.repos import AppRepos
 from charon.request_files import AppRequest, RequestFiles
 from charon.vault import Vault
 
@@ -43,6 +44,7 @@ class Outside(BaseModel):
     cluster: Cluster
     vault: Vault
     registry: Registry
+    repos: AppRepos
 
 
 class Seen(BaseModel):
@@ -152,6 +154,8 @@ def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches,
     blocked = common + [f"namespace {n} still exists" for n in owned if n in seen.namespaces]
     purge_secrets(name, blocked, outside.vault, switches.secrets)
     purge_images(name, blocked, outside.registry, switches.images)
+    if not blocked and outside.repos.not_archived(name):
+        log.info("%s repo: not archived, needs Mario's click", name)
 
 
 def purge(files: RequestFiles, outside: Outside, switches: Switches, now: datetime) -> int:
