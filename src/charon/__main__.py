@@ -1,9 +1,12 @@
-"""charon: Meru's purge (D83, D105, D107). Once a day, as a CronJob: an app removed more than its retention ago
-(`metadata.removedAt` in Meru/requests) loses what the retire only revoked. One pass, then exit - 0 when every step
-it reached is done or kept, 1 otherwise, so the CronJob's last successful run is what Zabbix watches.
+"""charon: Meru's purge (D83, D105, D107).
+
+Once a day, as a CronJob: an app removed more than its retention ago (`metadata.removedAt` in Meru/requests) loses what
+the retire only revoked. One pass, then exit - 0 when every step it reached is done or kept, 1 otherwise, so the
+CronJob's last successful run is what Zabbix watches.
 
 Each purge step comes with its own credential, one at a time. So far: the namespaces, the volumes, the OpenBao
-entries and the images (purge.py)."""
+entries and the images (purge.py).
+"""
 
 import logging
 import ssl
@@ -42,14 +45,14 @@ def run() -> int:
         httpx2.Client(base_url=settings.zot_url) as zot,
         httpx2.Client(base_url=settings.gitea_url) as anonymous_gitea,
     ):
-        vault = Vault(openbao, settings.openbao_role, (settings.openbao_dir / "token").read_text().strip())
+        vault = Vault.login(openbao, settings.openbao_role, (settings.openbao_dir / "token").read_text().strip())
         failed = purge(
-            RequestFiles(gitea, settings.requests_repo),
+            RequestFiles(http=gitea, repo=settings.requests_repo),
             Outside(
-                cluster=Cluster(kubernetes),
+                cluster=Cluster(http=kubernetes),
                 vault=vault,
-                registry=Registry(zot, settings.zot_user, settings.zot_password.get_secret_value()),
-                repos=AppRepos(anonymous_gitea, settings.apps_org),
+                registry=Registry(http=zot, user=settings.zot_user, password=settings.zot_password),
+                repos=AppRepos(http=anonymous_gitea, org=settings.apps_org),
             ),
             Switches(
                 namespaces=settings.delete_namespaces,
@@ -64,6 +67,7 @@ def run() -> int:
 
 
 def main() -> None:
+    """Set up logging, run one pass and exit with its code."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     logging.getLogger("httpx2").setLevel(logging.WARNING)
     sys.exit(run())

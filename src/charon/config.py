@@ -7,7 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="CHARON_")
+    """Everything a pass needs from its environment."""
+
+    model_config = SettingsConfigDict(env_prefix="CHARON_", frozen=True)
 
     # Where the work comes from (D83): the request files, read with a token that can only read that repo.
     gitea_url: str = "https://git.clockmost.com"
