@@ -25,7 +25,15 @@ package = false # an app, not a library: the code runs from src/
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+preview = true
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "Q", "C4", "FAST", "N", "PT", "ERA", "D", "complex-structure"]
+ignore = ["undocumented-public-init"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "unused-async"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

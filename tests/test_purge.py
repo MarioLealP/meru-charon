@@ -10,6 +10,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from pydantic import SecretStr
 
 from charon.cluster import REMOVED_AT, Cluster
 from charon.purge import Outside, Switches, purge
@@ -128,15 +129,15 @@ class World:
         zot = httpx2.Client(base_url="http://zot.test", transport=httpx2.MockTransport(self.zot))
         switches = Switches(namespaces=delete, volumes=volumes, secrets=secrets, images=images)
         outside = Outside(
-            cluster=Cluster(cluster),
-            vault=Vault(openbao, "meru-charon-purge", "pod-token"),
-            registry=Registry(zot, "charon", "pw"),
+            cluster=Cluster(http=cluster),
+            vault=Vault.login(openbao, "meru-charon-purge", "pod-token"),
+            registry=Registry(http=zot, user="charon", password=SecretStr("pw")),
             repos=AppRepos(
-                httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.anonymous_gitea)),
-                "Meru",
+                http=httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.anonymous_gitea)),
+                org="Meru",
             ),
         )
-        return purge(RequestFiles(gitea, "Meru/requests"), outside, switches, now)
+        return purge(RequestFiles(http=gitea, repo="Meru/requests"), outside, switches, now)
 
 
 @pytest.fixture

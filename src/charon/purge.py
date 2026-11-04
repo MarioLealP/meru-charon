@@ -1,11 +1,13 @@
-"""Purge steps 1 to 4 (D109-D112): a retired app's namespaces, volumes, OpenBao entries and images. Two keys for
-a namespace, set by different hands: the request says when it was removed and how long to keep it, and Shikigami's
-retire pass marked the namespace with that same moment. A volume has no mark: its second key is the cluster's own,
-Released, and that the namespace it belonged to is gone - so a volume always goes at least one pass after its namespace.
-The OpenBao entries wait for both of the app's namespaces the same way: nothing in OpenBao can refuse Charon on a live
-app, these checks are the only guard. The images wait the same way, and Zot refuses Charon on a repository that still
-has its own entry. Anything goes only when every check passes, so a restore, a second retire or a
-half-done retire keeps it."""
+"""Purge steps 1 to 4 (D109-D112): a retired app's namespaces, volumes, OpenBao entries and images.
+
+Two keys for a namespace, set by different hands: the request says when it was removed and how long to keep it, and
+Shikigami's retire pass marked the namespace with that same moment. A volume has no mark: its second key is the
+cluster's own, Released, and that the namespace it belonged to is gone - so a volume always goes at least one pass after
+its namespace. The OpenBao entries wait for both of the app's namespaces the same way: nothing in OpenBao can refuse
+Charon on a live app, these checks are the only guard. The images wait the same way, and Zot refuses Charon on a
+repository that still has its own entry. Anything goes only when every check passes, so a restore, a second retire or a
+half-done retire keeps it.
+"""
 
 import logging
 from datetime import UTC, datetime
@@ -39,7 +41,7 @@ class Switches(BaseModel):
 class Outside(BaseModel):
     """The systems a pass acts on."""
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=True)
 
     cluster: Cluster
     vault: Vault
@@ -73,6 +75,7 @@ def app_blockers(app: AppRequest, removed_at: datetime, argo_app: bool, now: dat
 
 
 def namespace_blockers(namespace: Namespace, removed_at: datetime) -> list[str]:
+    """What keeps this namespace: its mark has to be the request's own moment."""
     if namespace.removed_at is None:
         return ["no removed-at mark"]
     if namespace.removed_at != stamp(removed_at):
@@ -98,6 +101,7 @@ def secret_entries(name: str) -> list[str]:
 
 
 def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> None:
+    """Delete the app's OpenBao entries if nothing blocks them; with the switch off, only say so."""
     if found := blocked:
         log.info("%s secrets: kept: %s", name, "; ".join(found))
     elif delete:
@@ -109,6 +113,7 @@ def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> 
 
 
 def purge_images(name: str, blocked: list[str], registry: Registry, delete: bool) -> None:
+    """Delete the app's manifests from Zot if nothing blocks them; with the switch off, only say so."""
     digests = registry.manifests(name)
     if not digests:
         log.info("%s images: nothing left", name)
@@ -123,8 +128,9 @@ def purge_images(name: str, blocked: list[str], registry: Registry, delete: bool
 
 
 def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches, now: datetime) -> None:
+    """Take one removed app through every step, each behind its own checks and switch."""
     name = app.metadata.name
-    removed_at = app.metadata.removedAt
+    removed_at = app.metadata.removed_at
     if removed_at is None:
         log.warning("%s: kept: removed, but the request has no removedAt", name)
         return
