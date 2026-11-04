@@ -1,6 +1,6 @@
 """The fakes answer from responses captured off the live systems (tests/fixtures): namespaces.json from the cluster,
 volumes.json from the cluster (two Released PVs on tanuki-build's one folder, a Bound one on charon-build's),
-tanuki.yaml from Meru/requests, contents-apps.json is Gitea's directory listing."""
+tanuki.yaml from Meru/requests, contents-apps.json is Gitea's directory listing, zot-tags.json and DIGESTS from Zot."""
 
 import json
 import logging
@@ -11,7 +11,8 @@ import httpx2
 import pytest
 
 from charon.cluster import REMOVED_AT, Cluster
-from charon.purge import Switches, purge
+from charon.purge import Outside, Switches, purge
+from charon.registry import Registry
 from charon.request_files import RequestFiles
 from charon.vault import Vault
 
@@ -19,6 +20,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 REQUEST = (FIXTURES / "tanuki.yaml").read_text()
 AFTER_RETENTION = datetime(2026, 12, 3, 22, 15, 46, tzinfo=UTC)
 DURING_RETENTION = datetime(2026, 12, 3, 22, 15, 45, tzinfo=UTC)
+
+
+DIGESTS = {
+    "4d215b50deaa": "sha256:fcc8a6c072b472e725f17dc3809e7d990ee5c966b135235a11d83bc0f6a17b06",
+    "sha256-fcc8a6c072b472e725f17dc3809e7d990ee5c966b135235a11d83bc0f6a17b06.sig": (
+        "sha256:6e674079d4d26d72b01dd40d4a26caedd25e24d64f0c425ce17049826396e44c"
+    ),
+}
 
 
 class World:
@@ -34,6 +43,10 @@ class World:
         self.secrets_deleted: list[str] = []
         self.login: dict = {}
         self.vault_fails = False
+        self.images_deleted: list[str] = []
+        self.delete_auth: list[str] = []
+        self.repo_gone = False
+        self.zot_refuses = False
         self.gitea_fails = False
 
     @property
@@ -74,6 +87,22 @@ class World:
         self.secrets_deleted.append(request.url.path)
         return httpx2.Response(204)
 
+    def zot(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if request.method == "DELETE":
+            self.delete_auth.append(request.headers.get("Authorization", ""))
+            if self.zot_refuses:
+                return httpx2.Response(403)
+            self.images_deleted.append(path)
+            return httpx2.Response(202)
+        assert "Authorization" not in request.headers
+        if self.repo_gone:
+            return httpx2.Response(404)
+        if path.endswith("/tags/list"):
+            return httpx2.Response(200, content=(FIXTURES / "zot-tags.json").read_bytes())
+        assert request.method == "HEAD"
+        return httpx2.Response(200, headers={"Docker-Content-Digest": DIGESTS[path.rsplit("/", 1)[1]]})
+
     def namespace_gone(self) -> None:
         self.namespaces["items"] = [i for i in self.namespaces["items"] if i["metadata"]["name"] != "tanuki"]
 
@@ -81,13 +110,20 @@ class World:
     def tanuki_volumes(self) -> list[dict]:
         return [v for v in self.volumes["items"] if v["spec"]["claimRef"]["namespace"] == "tanuki-build"]
 
-    def run(self, delete: bool, now: datetime, volumes: bool = False, secrets: bool = False) -> int:
+    def run(
+        self, delete: bool, now: datetime, volumes: bool = False, secrets: bool = False, images: bool = False
+    ) -> int:
         gitea = httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.gitea))
         cluster = httpx2.Client(base_url="https://cluster.test", transport=httpx2.MockTransport(self.cluster))
         openbao = httpx2.Client(base_url="https://openbao.test", transport=httpx2.MockTransport(self.openbao))
-        switches = Switches(namespaces=delete, volumes=volumes, secrets=secrets)
-        vault = Vault(openbao, "meru-charon-purge", "pod-token")
-        return purge(RequestFiles(gitea, "Meru/requests"), Cluster(cluster), vault, switches, now)
+        zot = httpx2.Client(base_url="http://zot.test", transport=httpx2.MockTransport(self.zot))
+        switches = Switches(namespaces=delete, volumes=volumes, secrets=secrets, images=images)
+        outside = Outside(
+            cluster=Cluster(cluster),
+            vault=Vault(openbao, "meru-charon-purge", "pod-token"),
+            registry=Registry(zot, "charon", "pw"),
+        )
+        return purge(RequestFiles(gitea, "Meru/requests"), outside, switches, now)
 
 
 @pytest.fixture
@@ -310,3 +346,45 @@ def test_no_login_fails_the_pass_with_the_switch_off(world: World):
     world.vault_fails = True
     with pytest.raises(httpx2.HTTPStatusError):
         world.run(delete=False, now=DURING_RETENTION)
+
+
+def test_every_manifest_goes_by_digest_with_the_login(world: World):
+    world.namespace_gone()
+    assert world.run(delete=False, now=AFTER_RETENTION, images=True) == 0
+    assert world.images_deleted == [f"/v2/meru/tanuki/manifests/{digest}" for digest in DIGESTS.values()]
+    assert all(auth.startswith("Basic ") for auth in world.delete_auth)
+
+
+def test_the_image_switch_off_only_says_so(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    assert world.run(delete=True, now=AFTER_RETENTION, volumes=True, secrets=True, images=False) == 0
+    assert world.images_deleted == []
+    assert "tanuki images: would delete 2 (dry run)" in caplog.text
+
+
+def test_images_wait_for_the_retention(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.run(delete=False, now=DURING_RETENTION, images=True)
+    assert world.images_deleted == []
+    assert "tanuki images: kept 2: retention runs to" in caplog.text
+
+
+def test_images_stay_while_a_namespace_exists(world: World, caplog: pytest.LogCaptureFixture):
+    world.run(delete=False, now=AFTER_RETENTION, images=True)
+    assert world.images_deleted == []
+    assert "tanuki images: kept 2: namespace tanuki still exists" in caplog.text
+
+
+def test_a_repo_zot_no_longer_knows_is_done(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.repo_gone = True
+    assert world.run(delete=False, now=AFTER_RETENTION, images=True) == 0
+    assert world.delete_auth == []
+    assert "tanuki images: nothing left" in caplog.text
+
+
+def test_zot_refusing_a_repo_with_its_own_entry_fails_the_pass(world: World):
+    world.namespace_gone()
+    world.zot_refuses = True
+    assert world.run(delete=False, now=AFTER_RETENTION, images=True) == 1
+    assert world.images_deleted == []

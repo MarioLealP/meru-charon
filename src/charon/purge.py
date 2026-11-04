@@ -1,9 +1,10 @@
-"""Purge steps 1 to 3 (D109, D110, D111): a retired app's namespaces, its volumes, its OpenBao entries. Two keys for
+"""Purge steps 1 to 4 (D109-D112): a retired app's namespaces, volumes, OpenBao entries and images. Two keys for
 a namespace, set by different hands: the request says when it was removed and how long to keep it, and Shikigami's
 retire pass marked the namespace with that same moment. A volume has no mark: its second key is the cluster's own,
 Released, and that the namespace it belonged to is gone - so a volume always goes at least one pass after its namespace.
 The OpenBao entries wait for both of the app's namespaces the same way: nothing in OpenBao can refuse Charon on a live
-app, these checks are the only guard. Anything goes only when every check passes, so a restore, a second retire or a
+app, these checks are the only guard. The images wait the same way, and Zot refuses Charon on a repository that still
+has its own entry. Anything goes only when every check passes, so a restore, a second retire or a
 half-done retire keeps it."""
 
 import logging
@@ -14,6 +15,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from charon.cluster import Cluster, Namespace, Volume
+from charon.registry import Registry
 from charon.request_files import AppRequest, RequestFiles
 from charon.vault import Vault
 
@@ -30,6 +32,17 @@ class Switches(BaseModel):
     namespaces: bool
     volumes: bool
     secrets: bool
+    images: bool
+
+
+class Outside(BaseModel):
+    """The systems a pass acts on."""
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    cluster: Cluster
+    vault: Vault
+    registry: Registry
 
 
 class Seen(BaseModel):
@@ -82,9 +95,8 @@ def secret_entries(name: str) -> list[str]:
     return [f"{name}/eso/env", f"{name}-build/build", f"{name}-build/eso/sindri-registration"]
 
 
-def purge_secrets(name: str, common: list[str], owned: tuple[str, str], seen: Seen, vault: Vault, delete: bool) -> None:
-    left = [f"namespace {n} still exists" for n in owned if n in seen.namespaces]
-    if found := common + left:
+def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> None:
+    if found := blocked:
         log.info("%s secrets: kept: %s", name, "; ".join(found))
     elif delete:
         for entry in secret_entries(name):
@@ -94,7 +106,21 @@ def purge_secrets(name: str, common: list[str], owned: tuple[str, str], seen: Se
         log.info("%s secrets: would delete (dry run)", name)
 
 
-def purge_app(app: AppRequest, cluster: Cluster, vault: Vault, seen: Seen, switches: Switches, now: datetime) -> None:
+def purge_images(name: str, blocked: list[str], registry: Registry, delete: bool) -> None:
+    digests = registry.manifests(name)
+    if not digests:
+        log.info("%s images: nothing left", name)
+    elif blocked:
+        log.info("%s images: kept %d: %s", name, len(digests), "; ".join(blocked))
+    elif delete:
+        for digest in digests:
+            registry.delete(name, digest)
+        log.info("%s images: deleted %d", name, len(digests))
+    else:
+        log.info("%s images: would delete %d (dry run)", name, len(digests))
+
+
+def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches, now: datetime) -> None:
     name = app.metadata.name
     removed_at = app.metadata.removedAt
     if removed_at is None:
@@ -103,6 +129,7 @@ def purge_app(app: AppRequest, cluster: Cluster, vault: Vault, seen: Seen, switc
     owned = (name, f"{name}-build")
     namespaces = [seen.namespaces[n] for n in owned if n in seen.namespaces]
     volumes = [v for v in seen.volumes if v.waiting and v.claim_namespace in owned]
+    cluster = outside.cluster
     common = app_blockers(app, removed_at, cluster.has_application(name), now)
     for namespace in namespaces:
         target = namespace.metadata.name
@@ -122,18 +149,20 @@ def purge_app(app: AppRequest, cluster: Cluster, vault: Vault, seen: Seen, switc
             log.info("%s: released", target)
         else:
             log.info("%s: would release (dry run)", target)
-    purge_secrets(name, common, owned, seen, vault, switches.secrets)
+    blocked = common + [f"namespace {n} still exists" for n in owned if n in seen.namespaces]
+    purge_secrets(name, blocked, outside.vault, switches.secrets)
+    purge_images(name, blocked, outside.registry, switches.images)
 
 
-def purge(files: RequestFiles, cluster: Cluster, vault: Vault, switches: Switches, now: datetime) -> int:
+def purge(files: RequestFiles, outside: Outside, switches: Switches, now: datetime) -> int:
     """One pass over every app request. One app failing doesn't stop the others. Returns how many failed."""
-    seen = Seen(namespaces=cluster.namespaces(), volumes=cluster.volumes())
+    seen = Seen(namespaces=outside.cluster.namespaces(), volumes=outside.cluster.volumes())
     failed = 0
     for path in files.paths():
         try:
             app = files.read(path)
             if app.spec.removed:
-                purge_app(app, cluster, vault, seen, switches, now)
+                purge_app(app, outside, seen, switches, now)
         except READ_ERRORS:
             log.exception("%s: failed", path)
             failed += 1

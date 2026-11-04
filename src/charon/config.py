@@ -23,7 +23,13 @@ class Settings(BaseSettings):
     openbao_role: str = "meru-charon-purge"
     openbao_dir: Path = Path("/var/run/meru/openbao")  # token, ca.crt
 
+    # Zot (D112), inside the cluster: reads anonymous, this login only deletes.
+    zot_url: str = "http://zot.clockmost.com"
+    zot_user: str = "charon"
+    zot_password: SecretStr
+
     # Off = a pass only says what it would delete. Each stays off until Mario has read a pass's output.
     delete_namespaces: bool = False
     delete_volumes: bool = False
     delete_secrets: bool = False
+    delete_images: bool = False
