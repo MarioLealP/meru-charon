@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     kubernetes_url: str = "https://kubernetes.default.svc"
     kubernetes_dir: Path = Path("/var/run/meru/kubernetes")  # token, ca.crt
 
+    # OpenBao, with the pod's token for this role and CA (nuwa-app openbaoLogin).
+    openbao_addr: str = "https://openbao.clockmost.internal:8204"
+    openbao_role: str = "meru-charon-purge"
+    openbao_dir: Path = Path("/var/run/meru/openbao")  # token, ca.crt
+
     # Off = a pass only says what it would delete. Each stays off until Mario has read a pass's output.
     delete_namespaces: bool = False
     delete_volumes: bool = False
+    delete_secrets: bool = False

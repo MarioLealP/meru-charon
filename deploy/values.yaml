@@ -16,6 +16,9 @@ job:
 # Its own token for the cluster (Meru/meru rbac/): list and delete namespaces, read Argo Applications.
 kubernetesApi:
   enabled: true
+# Its own OpenBao login (D111): delete on a retired app's three entries, no read.
+openbaoLogin:
+  enabled: true
 # The bot's token: read-only, on Meru/requests alone.
 secretEnv:
   CHARON_GITEA_TOKEN:
