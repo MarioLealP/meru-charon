@@ -2,8 +2,8 @@
 (`metadata.removedAt` in Meru/requests) loses what the retire only revoked. One pass, then exit - 0 when every step
 it reached is done or kept, 1 otherwise, so the CronJob's last successful run is what Zabbix watches.
 
-Each purge step comes with its own credential, one at a time. So far: the namespaces, the volumes and the OpenBao
-entries (purge.py)."""
+Each purge step comes with its own credential, one at a time. So far: the namespaces, the volumes, the OpenBao
+entries and the images (purge.py)."""
 
 import logging
 import ssl
@@ -14,7 +14,8 @@ import httpx2
 
 from charon.cluster import Cluster
 from charon.config import Settings
-from charon.purge import Switches, purge
+from charon.purge import Outside, Switches, purge
+from charon.registry import Registry
 from charon.request_files import RequestFiles
 from charon.vault import Vault
 
@@ -37,16 +38,21 @@ def run() -> int:
             base_url=settings.openbao_addr,
             verify=ssl.create_default_context(cafile=settings.openbao_dir / "ca.crt"),
         ) as openbao,
+        httpx2.Client(base_url=settings.zot_url) as zot,
     ):
         vault = Vault(openbao, settings.openbao_role, (settings.openbao_dir / "token").read_text().strip())
         failed = purge(
             RequestFiles(gitea, settings.requests_repo),
-            Cluster(kubernetes),
-            vault,
+            Outside(
+                cluster=Cluster(kubernetes),
+                vault=vault,
+                registry=Registry(zot, settings.zot_user, settings.zot_password.get_secret_value()),
+            ),
             Switches(
                 namespaces=settings.delete_namespaces,
                 volumes=settings.delete_volumes,
                 secrets=settings.delete_secrets,
+                images=settings.delete_images,
             ),
             datetime.now(UTC),
         )

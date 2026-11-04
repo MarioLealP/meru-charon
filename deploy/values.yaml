@@ -24,5 +24,10 @@ secretEnv:
   CHARON_GITEA_TOKEN:
     secret: gitea
     key: token
+  # Its Zot login (D112): delete on repositories with no entry of their own.
+  CHARON_ZOT_PASSWORD:
+    secret: zot
+    key: password
 externalSecrets:
   gitea: {}
+  zot: {}
