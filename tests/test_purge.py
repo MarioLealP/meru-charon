@@ -1,4 +1,5 @@
 """The fakes answer from responses captured off the live systems (tests/fixtures): namespaces.json from the cluster,
+volumes.json from the cluster (two Released PVs on tanuki-build's one folder, a Bound one on charon-build's),
 tanuki.yaml from Meru/requests, contents-apps.json is Gitea's directory listing."""
 
 import json
@@ -10,7 +11,7 @@ import httpx2
 import pytest
 
 from charon.cluster import REMOVED_AT, Cluster
-from charon.purge import purge
+from charon.purge import Switches, purge
 from charon.request_files import RequestFiles
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -25,8 +26,10 @@ class World:
     def __init__(self) -> None:
         self.request = REQUEST
         self.namespaces = json.loads((FIXTURES / "namespaces.json").read_text())
+        self.volumes = json.loads((FIXTURES / "volumes.json").read_text())
         self.applications = {"app-thoth"}
         self.deleted: list[tuple[str, dict]] = []
+        self.released: list[tuple[str, dict]] = []
         self.gitea_fails = False
 
     @property
@@ -45,15 +48,29 @@ class World:
         if request.method == "DELETE":
             self.deleted.append((path.rsplit("/", 1)[1], json.loads(request.content)))
             return httpx2.Response(200, json={})
+        if request.method == "PATCH":
+            assert request.headers["Content-Type"] == "application/merge-patch+json"
+            self.released.append((path.rsplit("/", 1)[1], json.loads(request.content)))
+            return httpx2.Response(200, json={})
+        if path == "/api/v1/persistentvolumes":
+            return httpx2.Response(200, json=self.volumes)
         if path == "/api/v1/namespaces":
             assert request.url.params["labelSelector"] == "app.kubernetes.io/part-of=meru"
             return httpx2.Response(200, json=self.namespaces)
         return httpx2.Response(200 if path.rsplit("/", 1)[1] in self.applications else 404, json={})
 
-    def run(self, delete: bool, now: datetime) -> int:
+    def namespace_gone(self) -> None:
+        self.namespaces["items"] = [i for i in self.namespaces["items"] if i["metadata"]["name"] != "tanuki"]
+
+    @property
+    def tanuki_volumes(self) -> list[dict]:
+        return [v for v in self.volumes["items"] if v["spec"]["claimRef"]["namespace"] == "tanuki-build"]
+
+    def run(self, delete: bool, now: datetime, volumes: bool = False) -> int:
         gitea = httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.gitea))
         cluster = httpx2.Client(base_url="https://cluster.test", transport=httpx2.MockTransport(self.cluster))
-        return purge(RequestFiles(gitea, "Meru/requests"), Cluster(cluster), delete, now)
+        switches = Switches(namespaces=delete, volumes=volumes)
+        return purge(RequestFiles(gitea, "Meru/requests"), Cluster(cluster), switches, now)
 
 
 @pytest.fixture
@@ -138,10 +155,11 @@ def test_the_build_namespace_goes_with_the_same_checks(world: World):
 
 
 def test_a_namespace_outside_meru_is_never_touched(world: World, caplog: pytest.LogCaptureFixture):
-    world.namespaces["items"] = [i for i in world.namespaces["items"] if i["metadata"]["name"] != "tanuki"]
+    world.namespace_gone()
+    world.volumes["items"] = []
     assert world.run(delete=True, now=AFTER_RETENTION) == 0
     assert world.deleted == []
-    assert "tanuki: no namespace left" in caplog.text
+    assert "tanuki: nothing left" in caplog.text
 
 
 def test_a_failed_read_fails_the_pass_and_deletes_nothing(world: World):
@@ -153,3 +171,75 @@ def test_a_failed_read_fails_the_pass_and_deletes_nothing(world: World):
 def test_a_broken_file_fails_the_pass_too(world: World):
     world.request = "metadata: ["
     assert world.run(delete=True, now=AFTER_RETENTION) == 1
+
+
+def test_a_volume_goes_once_its_namespace_is_gone_each_by_uid(world: World):
+    world.namespace_gone()
+    assert world.run(delete=False, now=AFTER_RETENTION, volumes=True) == 0
+    assert world.released == [
+        (
+            v["metadata"]["name"],
+            {"metadata": {"uid": v["metadata"]["uid"]}, "spec": {"persistentVolumeReclaimPolicy": "Delete"}},
+        )
+        for v in world.tanuki_volumes
+    ]
+
+
+def test_the_volume_switch_off_only_says_so(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    assert world.run(delete=True, now=AFTER_RETENTION, volumes=False) == 0
+    assert world.released == []
+    assert "would release (dry run)" in caplog.text
+
+
+def test_the_namespace_switch_does_not_release_volumes(world: World):
+    assert world.run(delete=True, now=AFTER_RETENTION, volumes=False) == 0
+    assert [name for name, _ in world.deleted] == ["tanuki"]
+    assert world.released == []
+
+
+def test_a_volume_waits_for_the_retention(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.run(delete=False, now=DURING_RETENTION, volumes=True)
+    assert world.released == []
+    assert "tanuki-build volume" in caplog.text
+    assert "kept: retention runs to" in caplog.text
+
+
+def test_a_volume_stays_while_its_namespace_exists(world: World, caplog: pytest.LogCaptureFixture):
+    build = json.loads(json.dumps(world.tanuki))
+    build["metadata"] |= {"name": "tanuki-build", "uid": "build-uid"}
+    world.namespaces["items"].append(build)
+    world.run(delete=True, now=AFTER_RETENTION, volumes=True)
+    assert world.released == []
+    assert "namespace tanuki-build still exists" in caplog.text
+
+
+def test_a_living_argo_application_keeps_the_volumes(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.applications.add("app-tanuki")
+    world.run(delete=False, now=AFTER_RETENTION, volumes=True)
+    assert world.released == []
+    assert "its Argo Application still exists" in caplog.text
+
+
+def test_a_volume_in_use_on_the_same_folder_keeps_the_released_ones(world: World, caplog: pytest.LogCaptureFixture):
+    world.namespace_gone()
+    world.tanuki_volumes[0]["status"]["phase"] = "Bound"
+    world.run(delete=False, now=AFTER_RETENTION, volumes=True)
+    assert world.released == []
+    assert "a volume in use shares /home/k8s/volumes/tanuki-build/sindri-data" in caplog.text
+
+
+def test_a_volume_already_set_to_delete_is_left_alone(world: World):
+    world.namespace_gone()
+    world.tanuki_volumes[0]["spec"]["persistentVolumeReclaimPolicy"] = "Delete"
+    world.run(delete=False, now=AFTER_RETENTION, volumes=True)
+    assert [name for name, _ in world.released] == [world.tanuki_volumes[1]["metadata"]["name"]]
+
+
+def test_another_apps_volumes_are_never_touched(world: World):
+    world.namespace_gone()
+    world.run(delete=False, now=AFTER_RETENTION, volumes=True)
+    charon = next(v for v in world.volumes["items"] if v["spec"]["claimRef"]["namespace"] == "charon-build")
+    assert charon["metadata"]["name"] not in [name for name, _ in world.released]

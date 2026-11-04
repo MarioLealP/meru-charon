@@ -1,0 +1,186 @@
+{
+  "kind": "PersistentVolumeList",
+  "apiVersion": "v1",
+  "metadata": {
+    "resourceVersion": "3409608"
+  },
+  "items": [
+    {
+      "metadata": {
+        "name": "pvc-0ec1696f-4a40-4fd0-bfbd-3025d6ccbee4",
+        "uid": "42d32229-d208-4d74-8556-d86faaad376b",
+        "resourceVersion": "3132639",
+        "creationTimestamp": "2026-11-03T21:18:40Z",
+        "annotations": {
+          "local.path.provisioner/selected-node": "clockmost",
+          "pv.kubernetes.io/provisioned-by": "rancher.io/local-path"
+        },
+        "finalizers": [
+          "kubernetes.io/pv-protection"
+        ]
+      },
+      "spec": {
+        "capacity": {
+          "storage": "64Mi"
+        },
+        "hostPath": {
+          "path": "/home/k8s/volumes/tanuki-build/sindri-data",
+          "type": "DirectoryOrCreate"
+        },
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "claimRef": {
+          "kind": "PersistentVolumeClaim",
+          "namespace": "tanuki-build",
+          "name": "sindri-data",
+          "uid": "0ec1696f-4a40-4fd0-bfbd-3025d6ccbee4",
+          "apiVersion": "v1",
+          "resourceVersion": "3105301"
+        },
+        "persistentVolumeReclaimPolicy": "Retain",
+        "storageClassName": "local",
+        "volumeMode": "Filesystem",
+        "nodeAffinity": {
+          "required": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "kubernetes.io/hostname",
+                    "operator": "In",
+                    "values": [
+                      "clockmost"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "phase": "Released",
+        "lastPhaseTransitionTime": "2026-11-03T22:18:42Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "pvc-6d73aa4c-85df-4109-aa66-f01a7ffe2936",
+        "uid": "eb66cfd5-bed3-405b-9934-26d633a2a818",
+        "resourceVersion": "3008759",
+        "creationTimestamp": "2026-11-03T15:37:07Z",
+        "annotations": {
+          "local.path.provisioner/selected-node": "clockmost",
+          "pv.kubernetes.io/provisioned-by": "rancher.io/local-path"
+        },
+        "finalizers": [
+          "kubernetes.io/pv-protection"
+        ]
+      },
+      "spec": {
+        "capacity": {
+          "storage": "64Mi"
+        },
+        "hostPath": {
+          "path": "/home/k8s/volumes/charon-build/sindri-data",
+          "type": "DirectoryOrCreate"
+        },
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "claimRef": {
+          "kind": "PersistentVolumeClaim",
+          "namespace": "charon-build",
+          "name": "sindri-data",
+          "uid": "6d73aa4c-85df-4109-aa66-f01a7ffe2936",
+          "apiVersion": "v1",
+          "resourceVersion": "3008714"
+        },
+        "persistentVolumeReclaimPolicy": "Retain",
+        "storageClassName": "local",
+        "volumeMode": "Filesystem",
+        "nodeAffinity": {
+          "required": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "kubernetes.io/hostname",
+                    "operator": "In",
+                    "values": [
+                      "clockmost"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "phase": "Bound",
+        "lastPhaseTransitionTime": "2026-11-03T15:37:07Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "pvc-e67427a9-1f88-4e21-a99c-3643a6d44ca3",
+        "uid": "742bf9e9-317d-4adb-873c-fac8dacd9645",
+        "resourceVersion": "2930286",
+        "creationTimestamp": "2026-11-02T10:12:01Z",
+        "annotations": {
+          "local.path.provisioner/selected-node": "clockmost",
+          "pv.kubernetes.io/provisioned-by": "rancher.io/local-path"
+        },
+        "finalizers": [
+          "kubernetes.io/pv-protection"
+        ]
+      },
+      "spec": {
+        "capacity": {
+          "storage": "64Mi"
+        },
+        "hostPath": {
+          "path": "/home/k8s/volumes/tanuki-build/sindri-data",
+          "type": "DirectoryOrCreate"
+        },
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "claimRef": {
+          "kind": "PersistentVolumeClaim",
+          "namespace": "tanuki-build",
+          "name": "sindri-data",
+          "uid": "e67427a9-1f88-4e21-a99c-3643a6d44ca3",
+          "apiVersion": "v1",
+          "resourceVersion": "2255898"
+        },
+        "persistentVolumeReclaimPolicy": "Retain",
+        "storageClassName": "local",
+        "volumeMode": "Filesystem",
+        "nodeAffinity": {
+          "required": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "kubernetes.io/hostname",
+                    "operator": "In",
+                    "values": [
+                      "clockmost"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "phase": "Released",
+        "lastPhaseTransitionTime": "2026-11-03T12:36:33Z"
+      }
+    }
+  ]
+}
