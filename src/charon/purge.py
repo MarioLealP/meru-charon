@@ -116,7 +116,8 @@ def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> 
         log.info("%s secrets: kept: %s", name, "; ".join(found))
         return False
     if delete:
-        for entry in secret_entries(name):
+        changes = [f"{name}/eso/{n}" for n in vault.names(name) if n.startswith("env-")]  # D123's change entries
+        for entry in secret_entries(name) + changes:
             vault.delete(entry)
         log.info("%s secrets: deleted", name)
         return True

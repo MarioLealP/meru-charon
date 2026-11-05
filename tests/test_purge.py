@@ -45,6 +45,7 @@ class World:
         self.deleted: list[tuple[str, dict]] = []
         self.released: list[tuple[str, dict]] = []
         self.secrets_deleted: list[str] = []
+        self.change_entries: list[str] = []  # what OpenBao lists under tanuki/eso/
         self.login: dict = {}
         self.vault_fails = False
         self.images_deleted: list[str] = []
@@ -93,8 +94,14 @@ class World:
                 return httpx2.Response(403, json={"errors": ["permission denied"]})
             self.login = json.loads(request.content)
             return httpx2.Response(200, json={"auth": {"client_token": "bao-token", "lease_duration": 600}})
-        assert request.method == "DELETE"
         assert request.headers["X-Vault-Token"] == "bao-token"
+        if request.method == "GET":
+            assert request.url.path == "/v1/apps/metadata/meru/tanuki/eso/"
+            assert request.url.params["list"] == "true"
+            if not self.change_entries:
+                return httpx2.Response(404, json={"errors": []})
+            return httpx2.Response(200, json={"data": {"keys": [*self.change_entries, "sub/"]}})
+        assert request.method == "DELETE"
         self.secrets_deleted.append(request.url.path)
         return httpx2.Response(204)
 
@@ -354,6 +361,13 @@ def test_the_three_entries_go_once_both_namespaces_are_gone(world: World):
         "/v1/apps/metadata/meru/tanuki-build/build",
         "/v1/apps/metadata/meru/tanuki-build/eso/sindri-registration",
     ]
+
+
+def test_a_retired_apps_change_entries_go_with_it(world: World):
+    world.change_entries = ["env", "env-20261105-a1b2c3", "sindri-registration"]
+    world.namespace_gone()
+    assert world.run(delete=False, now=AFTER_RETENTION, secrets=True) == 0
+    assert world.secrets_deleted[3:] == ["/v1/apps/metadata/meru/tanuki/eso/env-20261105-a1b2c3"]
 
 
 def test_the_secret_switch_off_only_says_so(world: World, caplog: pytest.LogCaptureFixture):
