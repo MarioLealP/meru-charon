@@ -39,3 +39,8 @@ class Settings(BaseSettings):
     delete_secrets: bool = False
     delete_images: bool = False
     propose_removal: bool = False
+    sweep_entries: bool = False  # D124: delete unreferenced change entries (env-*); the count goes to Zabbix either way
+
+    # The sweep's report, which Zabbix reads (Meru/meru rbac/charon-sweep-report.yaml).
+    report_namespace: str = "charon"
+    report_name: str = "charon-sweep"

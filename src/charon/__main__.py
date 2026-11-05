@@ -5,7 +5,8 @@ the retire only revoked. One pass, then exit - 0 when every step it reached is d
 CronJob's last successful run is what Zabbix watches.
 
 Each purge step comes with its own credential, one at a time. So far: the namespaces, the volumes, the OpenBao
-entries, the images (purge.py) and, last, the request file itself (removal.py).
+entries, the images (purge.py) and, last, the request file itself (removal.py). Then the sweep of change entries
+nothing points at any more (sweep.py, D124), which reports to Zabbix through a ConfigMap.
 """
 
 import logging
@@ -17,12 +18,25 @@ import httpx2
 
 from charon.cluster import Cluster
 from charon.config import Settings
-from charon.purge import Outside, Switches, purge
+from charon.purge import READ_ERRORS, Outside, Switches, purge
 from charon.registry import Registry
 from charon.removal import Removals
 from charon.repos import AppRepos
 from charon.request_files import RequestFiles
+from charon.sweep import SweepReport, sweep
 from charon.vault import Vault
+
+
+def sweep_and_report(files: RequestFiles, outside: Outside, kubernetes: httpx2.Client, settings: Settings) -> int:
+    """The sweep, then its report. A sweep that can't finish writes no report: Zabbix's stale check catches it."""
+    now = datetime.now(UTC)
+    try:
+        report, failed = sweep(files, outside, settings.sweep_entries, now)
+        SweepReport(http=kubernetes, namespace=settings.report_namespace, name=settings.report_name).write(report, now)
+    except READ_ERRORS:
+        logging.getLogger("charon").exception("sweep: failed")
+        return 1
+    return failed
 
 
 def run() -> int:
@@ -47,21 +61,23 @@ def run() -> int:
         httpx2.Client(base_url=settings.gitea_url) as anonymous_gitea,
     ):
         vault = Vault.login(openbao, settings.openbao_role, (settings.openbao_dir / "token").read_text().strip())
-        failed = purge(
-            RequestFiles(http=gitea, repo=settings.requests_repo),
-            Outside(
-                cluster=Cluster(http=kubernetes),
-                vault=vault,
-                registry=Registry(http=zot, user=settings.zot_user, password=settings.zot_password),
-                repos=AppRepos(http=anonymous_gitea, org=settings.apps_org),
-                removals=Removals(
-                    http=gitea,
-                    gitea_url=settings.gitea_url,
-                    repo=settings.requests_repo,
-                    user=settings.gitea_user,
-                    token=settings.gitea_token,
-                ),
+        files = RequestFiles(http=gitea, repo=settings.requests_repo)
+        outside = Outside(
+            cluster=Cluster(http=kubernetes),
+            vault=vault,
+            registry=Registry(http=zot, user=settings.zot_user, password=settings.zot_password),
+            repos=AppRepos(http=anonymous_gitea, org=settings.apps_org),
+            removals=Removals(
+                http=gitea,
+                gitea_url=settings.gitea_url,
+                repo=settings.requests_repo,
+                user=settings.gitea_user,
+                token=settings.gitea_token,
             ),
+        )
+        failed = purge(
+            files,
+            outside,
             Switches(
                 namespaces=settings.delete_namespaces,
                 volumes=settings.delete_volumes,
@@ -71,6 +87,7 @@ def run() -> int:
             ),
             datetime.now(UTC),
         )
+        failed += sweep_and_report(files, outside, kubernetes, settings)
     logging.getLogger("charon").info("pass done: %d failed", failed)
     return 1 if failed else 0
 
