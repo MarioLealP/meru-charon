@@ -10,11 +10,12 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 
 from charon.cluster import REMOVED_AT, Cluster
 from charon.purge import Outside, Switches, purge
 from charon.registry import Registry
+from charon.removal import Removals, title
 from charon.repos import AppRepos
 from charon.request_files import RequestFiles
 from charon.vault import Vault
@@ -53,6 +54,8 @@ class World:
         self.repo = json.loads((FIXTURES / "repo-tanuki.json").read_text())
         self.repo_status = 200
         self.gitea_fails = False
+        self.open_titles: list[str] = []
+        self.proposed: list[tuple[str, str, str]] = []
 
     @property
     def tanuki(self) -> dict:
@@ -61,6 +64,9 @@ class World:
     def gitea(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("/contents/apps"):
             return httpx2.Response(200, content=(FIXTURES / "contents-apps.json").read_bytes())
+        if request.url.path == "/api/v1/repos/Meru/requests/pulls":
+            assert request.url.params["state"] == "open"
+            return httpx2.Response(200, json=[{"title": t, "number": 1} for t in self.open_titles])
         if self.gitea_fails:
             return httpx2.Response(500)
         return httpx2.Response(200, text=self.request)
@@ -120,14 +126,31 @@ class World:
     def tanuki_volumes(self) -> list[dict]:
         return [v for v in self.volumes["items"] if v["spec"]["claimRef"]["namespace"] == "tanuki-build"]
 
+    def all_gone(self) -> None:
+        """Everything of tanuki purged in earlier passes: namespaces, volumes, images; its repo archived."""
+        self.namespace_gone()
+        self.namespaces["items"] = [i for i in self.namespaces["items"] if i["metadata"]["name"] != "tanuki-build"]
+        self.volumes["items"] = [v for v in self.volumes["items"] if v not in self.tanuki_volumes]
+        self.repo_gone = True
+        self.repo["archived"] = True
+
     def run(
-        self, delete: bool, now: datetime, volumes: bool = False, secrets: bool = False, images: bool = False
+        self,
+        delete: bool,
+        now: datetime,
+        volumes: bool = False,
+        secrets: bool = False,
+        images: bool = False,
+        removal: bool = False,
     ) -> int:
         gitea = httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.gitea))
         cluster = httpx2.Client(base_url="https://cluster.test", transport=httpx2.MockTransport(self.cluster))
         openbao = httpx2.Client(base_url="https://openbao.test", transport=httpx2.MockTransport(self.openbao))
         zot = httpx2.Client(base_url="http://zot.test", transport=httpx2.MockTransport(self.zot))
-        switches = Switches(namespaces=delete, volumes=volumes, secrets=secrets, images=images)
+        removals = FakeRemovals(
+            http=gitea, gitea_url="https://gitea.test", repo="Meru/requests", user="charon", token=SecretStr("t")
+        )
+        switches = Switches(namespaces=delete, volumes=volumes, secrets=secrets, images=images, removal=removal)
         outside = Outside(
             cluster=Cluster(http=cluster),
             vault=Vault.login(openbao, "meru-charon-purge", "pod-token"),
@@ -136,8 +159,20 @@ class World:
                 http=httpx2.Client(base_url="https://gitea.test", transport=httpx2.MockTransport(self.anonymous_gitea)),
                 org="Meru",
             ),
+            removals=removals,
         )
-        return purge(RequestFiles(http=gitea, repo="Meru/requests"), outside, switches, now)
+        failed = purge(RequestFiles(http=gitea, repo="Meru/requests"), outside, switches, now)
+        self.proposed = list(removals.proposed)
+        return failed
+
+
+class FakeRemovals(Removals):
+    """The PR listing goes to the World's Gitea; the git push is recorded instead (it needs a real remote)."""
+
+    proposed: list[tuple[str, str, str]] = Field(default_factory=list)
+
+    def propose(self, app: str, path: str, before: str) -> None:
+        self.proposed.append((app, path, before))
 
 
 @pytest.fixture
@@ -433,3 +468,69 @@ def test_a_repo_that_is_gone_needs_no_reminder(world: World, caplog: pytest.LogC
     world.repo_status = 404
     assert world.run(delete=False, now=AFTER_RETENTION) == 0
     assert "needs Mario's click" not in caplog.text
+
+
+def test_with_nothing_left_it_proposes_deleting_the_request(world: World, caplog: pytest.LogCaptureFixture):
+    world.all_gone()
+    assert world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True) == 0
+    assert world.proposed == [("tanuki", "apps/tanuki.yaml", REQUEST)]  # main must still hold what was read
+    assert "tanuki request: removal PR opened" in caplog.text
+
+
+def test_the_removal_switch_off_only_says_so(world: World, caplog: pytest.LogCaptureFixture):
+    world.all_gone()
+    assert world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True) == 0
+    assert world.proposed == []
+    assert "tanuki request: would propose deleting apps/tanuki.yaml (dry run)" in caplog.text
+
+
+def test_an_open_removal_pr_is_not_opened_twice(world: World, caplog: pytest.LogCaptureFixture):
+    world.all_gone()
+    world.open_titles = [title("tanuki")]
+    world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True)
+    assert world.proposed == []
+    assert "tanuki request: removal PR already open" in caplog.text
+
+
+def test_secrets_not_deleted_in_this_pass_keep_the_request(world: World):
+    world.all_gone()  # Charon can't see an entry, so only a delete in this pass counts
+    world.run(delete=True, now=AFTER_RETENTION, images=True, removal=True)
+    assert world.proposed == []
+
+
+def test_images_left_keep_the_request(world: World):
+    world.all_gone()
+    world.repo_gone = False  # Zot still has tanuki's manifests
+    world.run(delete=True, now=AFTER_RETENTION, secrets=True, removal=True)
+    assert world.proposed == []
+
+
+def test_a_volume_left_keeps_the_request(world: World):
+    world.namespace_gone()
+    world.namespaces["items"] = [i for i in world.namespaces["items"] if i["metadata"]["name"] != "tanuki-build"]
+    world.repo_gone = True
+    world.repo["archived"] = True
+    world.run(delete=True, now=AFTER_RETENTION, volumes=True, secrets=True, images=True, removal=True)
+    assert world.released  # released in this pass, but still listed until the provisioner removes them
+    assert world.proposed == []
+
+
+def test_an_open_repo_keeps_the_request(world: World, caplog: pytest.LogCaptureFixture):
+    world.all_gone()
+    world.repo["archived"] = False
+    world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True)
+    assert world.proposed == []
+    assert "needs Mario's click" in caplog.text
+
+
+def test_during_the_retention_nothing_is_proposed(world: World):
+    world.all_gone()
+    world.run(delete=True, now=DURING_RETENTION, secrets=True, images=True, removal=True)
+    assert world.proposed == []
+
+
+def test_a_living_argo_application_keeps_the_request(world: World):
+    world.all_gone()
+    world.applications.add("app-tanuki")
+    world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True)
+    assert world.proposed == []

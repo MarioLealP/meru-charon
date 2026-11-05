@@ -43,7 +43,7 @@ class _Entry(Incoming):
 
 
 class RequestFiles(BaseModel):
-    """Meru/requests on Gitea, with a token that can only read that repo."""
+    """Meru/requests on Gitea, with the bot that has only Read on it (D119)."""
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -57,8 +57,13 @@ class RequestFiles(BaseModel):
         entries = [_Entry.model_validate(entry) for entry in response.json()]
         return [entry.path for entry in entries if entry.type == "file" and entry.path.endswith(".yaml")]
 
-    def read(self, path: str) -> AppRequest:
-        """One app request, validated."""
+    def raw(self, path: str) -> str:
+        """One app request's text, as main holds it - what a removal PR must still find there."""
         response = self.http.get(f"/api/v1/repos/{self.repo}/raw/{path}")
         response.raise_for_status()
-        return AppRequest.model_validate(yaml.safe_load(response.text))
+        return response.text
+
+
+def parse(text: str) -> AppRequest:
+    """One app request, validated."""
+    return AppRequest.model_validate(yaml.safe_load(text))

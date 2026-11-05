@@ -7,6 +7,9 @@ its namespace. The OpenBao entries wait for both of the app's namespaces the sam
 Charon on a live app, these checks are the only guard. The images wait the same way, and Zot refuses Charon on a
 repository that still has its own entry. Anything goes only when every check passes, so a restore, a second retire or a
 half-done retire keeps it.
+
+Step 5 (removal.py): when a pass finds nothing of the app left - no namespace, no volume, the entries deleted, no image,
+the repo archived - it proposes deleting the request file.
 """
 
 import logging
@@ -18,13 +21,14 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from charon.cluster import Cluster, Namespace, Volume
 from charon.registry import Registry
+from charon.removal import ProposalFailedError, Removals
 from charon.repos import AppRepos
-from charon.request_files import AppRequest, RequestFiles
+from charon.request_files import AppRequest, RequestFiles, parse
 from charon.vault import Vault
 
 log = logging.getLogger("charon")
 
-READ_ERRORS = (httpx2.HTTPError, ValidationError, yaml.YAMLError)
+READ_ERRORS = (httpx2.HTTPError, ValidationError, yaml.YAMLError, ProposalFailedError)
 
 
 class Switches(BaseModel):
@@ -36,6 +40,7 @@ class Switches(BaseModel):
     volumes: bool
     secrets: bool
     images: bool
+    removal: bool
 
 
 class Outside(BaseModel):
@@ -47,6 +52,7 @@ class Outside(BaseModel):
     vault: Vault
     registry: Registry
     repos: AppRepos
+    removals: Removals
 
 
 class Seen(BaseModel):
@@ -100,40 +106,49 @@ def secret_entries(name: str) -> list[str]:
     return [f"{name}/eso/env", f"{name}-build/build", f"{name}-build/eso/sindri-registration"]
 
 
-def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> None:
-    """Delete the app's OpenBao entries if nothing blocks them; with the switch off, only say so."""
+def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> bool:
+    """Delete the app's OpenBao entries if nothing blocks them; with the switch off, only say so.
+
+    True once they're gone. Charon can't see whether an entry exists, so that means: deleted in this pass - a delete
+    answers the same for one already gone, so every pass after the first repeats it harmlessly.
+    """
     if found := blocked:
         log.info("%s secrets: kept: %s", name, "; ".join(found))
-    elif delete:
+        return False
+    if delete:
         for entry in secret_entries(name):
             vault.delete(entry)
         log.info("%s secrets: deleted", name)
-    else:
-        log.info("%s secrets: would delete (dry run)", name)
+        return True
+    log.info("%s secrets: would delete (dry run)", name)
+    return False
 
 
-def purge_images(name: str, blocked: list[str], registry: Registry, delete: bool) -> None:
-    """Delete the app's manifests from Zot if nothing blocks them; with the switch off, only say so."""
+def purge_images(name: str, blocked: list[str], registry: Registry, delete: bool) -> bool:
+    """Delete the app's manifests from Zot if nothing blocks them; with the switch off, only say so. True once none."""
     digests = registry.manifests(name)
     if not digests:
         log.info("%s images: nothing left", name)
-    elif blocked:
+        return True
+    if blocked:
         log.info("%s images: kept %d: %s", name, len(digests), "; ".join(blocked))
-    elif delete:
+        return False
+    if delete:
         for digest in digests:
             registry.delete(name, digest)
         log.info("%s images: deleted %d", name, len(digests))
-    else:
-        log.info("%s images: would delete %d (dry run)", name, len(digests))
+        return True
+    log.info("%s images: would delete %d (dry run)", name, len(digests))
+    return False
 
 
-def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches, now: datetime) -> None:
-    """Take one removed app through every step, each behind its own checks and switch."""
+def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches, now: datetime) -> bool:
+    """Take one removed app through every step, each behind its own checks and switch. True once nothing is left."""
     name = app.metadata.name
     removed_at = app.metadata.removed_at
     if removed_at is None:
         log.warning("%s: kept: removed, but the request has no removedAt", name)
-        return
+        return False
     owned = (name, f"{name}-build")
     namespaces = [seen.namespaces[n] for n in owned if n in seen.namespaces]
     volumes = [v for v in seen.volumes if v.waiting and v.claim_namespace in owned]
@@ -158,10 +173,28 @@ def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches,
         else:
             log.info("%s: would release (dry run)", target)
     blocked = common + [f"namespace {n} still exists" for n in owned if n in seen.namespaces]
-    purge_secrets(name, blocked, outside.vault, switches.secrets)
-    purge_images(name, blocked, outside.registry, switches.images)
-    if not blocked and outside.repos.not_archived(name):
+    secrets_gone = purge_secrets(name, blocked, outside.vault, switches.secrets)
+    images_gone = purge_images(name, blocked, outside.registry, switches.images)
+    if blocked:
+        return False
+    repo_open = outside.repos.not_archived(name)
+    if repo_open:
         log.info("%s repo: not archived, needs Mario's click", name)
+    # A volume released in this pass is still listed: the provisioner removes it after, so the next pass sees it gone.
+    volumes_left = any(v.claim_namespace in owned for v in seen.volumes)
+    return secrets_gone and images_gone and not repo_open and not volumes_left
+
+
+def propose_removal(app: AppRequest, path: str, text: str, removals: Removals, propose: bool) -> None:
+    """Step 5: ask for the request file to go - once, behind its own switch."""
+    name = app.metadata.name
+    if removals.pending(name):
+        log.info("%s request: removal PR already open", name)
+    elif propose:
+        removals.propose(name, path, text)
+        log.info("%s request: removal PR opened", name)
+    else:
+        log.info("%s request: would propose deleting %s (dry run)", name, path)
 
 
 def purge(files: RequestFiles, outside: Outside, switches: Switches, now: datetime) -> int:
@@ -170,9 +203,10 @@ def purge(files: RequestFiles, outside: Outside, switches: Switches, now: dateti
     failed = 0
     for path in files.paths():
         try:
-            app = files.read(path)
-            if app.spec.removed:
-                purge_app(app, outside, seen, switches, now)
+            text = files.raw(path)
+            app = parse(text)
+            if app.spec.removed and purge_app(app, outside, seen, switches, now):
+                propose_removal(app, path, text, outside.removals, switches.removal)
         except READ_ERRORS:
             log.exception("%s: failed", path)
             failed += 1

@@ -5,7 +5,7 @@ the retire only revoked. One pass, then exit - 0 when every step it reached is d
 CronJob's last successful run is what Zabbix watches.
 
 Each purge step comes with its own credential, one at a time. So far: the namespaces, the volumes, the OpenBao
-entries and the images (purge.py).
+entries, the images (purge.py) and, last, the request file itself (removal.py).
 """
 
 import logging
@@ -19,6 +19,7 @@ from charon.cluster import Cluster
 from charon.config import Settings
 from charon.purge import Outside, Switches, purge
 from charon.registry import Registry
+from charon.removal import Removals
 from charon.repos import AppRepos
 from charon.request_files import RequestFiles
 from charon.vault import Vault
@@ -53,12 +54,20 @@ def run() -> int:
                 vault=vault,
                 registry=Registry(http=zot, user=settings.zot_user, password=settings.zot_password),
                 repos=AppRepos(http=anonymous_gitea, org=settings.apps_org),
+                removals=Removals(
+                    http=gitea,
+                    gitea_url=settings.gitea_url,
+                    repo=settings.requests_repo,
+                    user=settings.gitea_user,
+                    token=settings.gitea_token,
+                ),
             ),
             Switches(
                 namespaces=settings.delete_namespaces,
                 volumes=settings.delete_volumes,
                 secrets=settings.delete_secrets,
                 images=settings.delete_images,
+                removal=settings.propose_removal,
             ),
             datetime.now(UTC),
         )
