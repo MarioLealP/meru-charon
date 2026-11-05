@@ -11,10 +11,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="CHARON_", frozen=True)
 
-    # Where the work comes from (D83): the request files, read with a token that can only read that repo.
+    # Where the work comes from (D83): the request files. The bot has Read on that repo only; its token is scoped
+    # write:repository so it can propose the removal PR (AGit, D119) - a proposal, never a change to main.
     gitea_url: str = "https://git.clockmost.com"
     requests_repo: str = "Meru/requests"
     gitea_token: SecretStr
+    gitea_user: str = "charon"  # the bot the token belongs to, for git's login
     apps_org: str = "Meru"
 
     # The cluster, with the pod's own token and CA (nuwa-app kubernetesApi).
@@ -36,3 +38,4 @@ class Settings(BaseSettings):
     delete_volumes: bool = False
     delete_secrets: bool = False
     delete_images: bool = False
+    propose_removal: bool = False

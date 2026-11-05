@@ -2,6 +2,10 @@ FROM docker.io/library/python:3.15.2-slim@sha256:c4158543ecb725b99e57d129dfd43d7
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 /uv /bin/uv
 
+# git opens Charon's one kind of PR - deleting a purged app's request - into Meru/requests, where it may only read
+# (AGit, D119).
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
