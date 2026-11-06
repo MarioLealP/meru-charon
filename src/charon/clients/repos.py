@@ -9,7 +9,7 @@ import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict
 
-from charon.incoming import Incoming
+from charon.models.incoming import Incoming
 
 
 class _Repo(Incoming):

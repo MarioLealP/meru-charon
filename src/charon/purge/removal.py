@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx2
 from pydantic import BaseModel, ConfigDict, SecretStr, TypeAdapter
 
-from charon.incoming import Incoming
+from charon.models.incoming import Incoming
 
 AUTHOR = ("Charon (Meru purge)", "charon@clockmost.local")
 

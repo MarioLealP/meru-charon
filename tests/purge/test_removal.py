@@ -7,7 +7,7 @@ import httpx2
 import pytest
 from pydantic import SecretStr
 
-from charon.removal import ProposalFailedError, Removals, title
+from charon.purge.removal import ProposalFailedError, Removals, title
 
 REQUEST = "apiVersion: meru.clockmost.com/v1\nkind: App\nmetadata:\n  name: tanuki\n"
 

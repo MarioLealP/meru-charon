@@ -8,7 +8,7 @@ is all Charon does - Zot's garbage collection clears the blobs.
 import httpx2
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from charon.incoming import Incoming
+from charon.models.incoming import Incoming
 
 MANIFESTS = ", ".join(
     (

@@ -17,15 +17,15 @@ from datetime import UTC, datetime
 import httpx2
 import sentry_sdk
 
-from charon.cluster import Cluster
+from charon.clients.cluster import Cluster
+from charon.clients.registry import Registry
+from charon.clients.repos import AppRepos
+from charon.clients.request_files import RequestFiles
+from charon.clients.vault import Vault
 from charon.config import Settings
-from charon.purge import READ_ERRORS, Outside, Switches, purge
-from charon.registry import Registry
-from charon.removal import Removals
-from charon.repos import AppRepos
-from charon.request_files import RequestFiles
-from charon.sweep import SweepReport, sweep
-from charon.vault import Vault
+from charon.purge.purge import READ_ERRORS, Outside, Switches, purge
+from charon.purge.removal import Removals
+from charon.sweep.sweep import SweepReport, sweep
 
 
 def sweep_and_report(files: RequestFiles, outside: Outside, kubernetes: httpx2.Client, settings: Settings) -> int:

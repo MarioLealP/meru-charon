@@ -10,7 +10,7 @@ import json
 import httpx2
 from pydantic import BaseModel, ConfigDict, Field
 
-from charon.incoming import Incoming
+from charon.models.incoming import Incoming
 
 MERU_NAMESPACES = "app.kubernetes.io/part-of=meru"
 REMOVED_AT = "meru.clockmost.com/removed-at"
