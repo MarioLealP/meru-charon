@@ -31,3 +31,7 @@ secretEnv:
 externalSecrets:
   gitea: {}
   zot: {}
+
+# Crash reports (D125): this app's GlitchTip project, which Shikigami made (it predates the marker's own DSN line).
+glitchtip:
+  dsn: https://91a85a3eaa6c47d9aa7938e934930657@glitchtip.clockmost.com/2
