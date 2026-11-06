@@ -11,7 +11,7 @@ from typing import Self
 import httpx2
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from charon.incoming import Incoming
+from charon.models.incoming import Incoming
 
 
 class _Auth(Incoming):

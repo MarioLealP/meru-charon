@@ -10,7 +10,7 @@ import httpx2
 import yaml
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
-from charon.incoming import Incoming
+from charon.models.incoming import Incoming
 
 Days = Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]{0,3}d$")]
 

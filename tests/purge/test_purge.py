@@ -12,15 +12,15 @@ import httpx2
 import pytest
 from pydantic import Field, SecretStr
 
-from charon.cluster import REMOVED_AT, Cluster
-from charon.purge import Outside, Switches, purge
-from charon.registry import Registry
-from charon.removal import Removals, title
-from charon.repos import AppRepos
-from charon.request_files import RequestFiles
-from charon.vault import Vault
+from charon.clients.cluster import REMOVED_AT, Cluster
+from charon.clients.registry import Registry
+from charon.clients.repos import AppRepos
+from charon.clients.request_files import RequestFiles
+from charon.clients.vault import Vault
+from charon.purge.purge import Outside, Switches, purge
+from charon.purge.removal import Removals, title
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 REQUEST = (FIXTURES / "tanuki.yaml").read_text()
 AFTER_RETENTION = datetime(2026, 12, 3, 22, 15, 46, tzinfo=UTC)
 DURING_RETENTION = datetime(2026, 12, 3, 22, 15, 45, tzinfo=UTC)

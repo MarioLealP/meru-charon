@@ -17,8 +17,8 @@ from datetime import datetime, timedelta
 import httpx2
 from pydantic import BaseModel, ConfigDict
 
-from charon.purge import READ_ERRORS, Outside
-from charon.request_files import RequestFiles, parse
+from charon.clients.request_files import RequestFiles, parse
+from charon.purge.purge import READ_ERRORS, Outside
 
 log = logging.getLogger("charon")
 

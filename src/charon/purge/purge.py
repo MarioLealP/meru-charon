@@ -19,12 +19,12 @@ import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from charon.cluster import Cluster, Namespace, Volume
-from charon.registry import Registry
-from charon.removal import ProposalFailedError, Removals
-from charon.repos import AppRepos
-from charon.request_files import AppRequest, RequestFiles, parse
-from charon.vault import Vault
+from charon.clients.cluster import Cluster, Namespace, Volume
+from charon.clients.registry import Registry
+from charon.clients.repos import AppRepos
+from charon.clients.request_files import AppRequest, RequestFiles, parse
+from charon.clients.vault import Vault
+from charon.purge.removal import ProposalFailedError, Removals
 
 log = logging.getLogger("charon")
 

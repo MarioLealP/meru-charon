@@ -7,14 +7,14 @@ import httpx2
 import pytest
 from pydantic import SecretStr
 
-from charon.cluster import Cluster
-from charon.purge import Outside
-from charon.registry import Registry
-from charon.removal import Removals
-from charon.repos import AppRepos
-from charon.request_files import RequestFiles
-from charon.sweep import Report, SweepReport, sweep
-from charon.vault import Vault
+from charon.clients.cluster import Cluster
+from charon.clients.registry import Registry
+from charon.clients.repos import AppRepos
+from charon.clients.request_files import RequestFiles
+from charon.clients.vault import Vault
+from charon.purge.purge import Outside
+from charon.purge.removal import Removals
+from charon.sweep.sweep import Report, SweepReport, sweep
 
 NOW = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 OLD = "2026-11-01T10:00:00.123456789Z"
