@@ -97,7 +97,11 @@ def sweep(files: RequestFiles, outside: Outside, delete: bool, now: datetime) ->
         app = path.removeprefix("apps/").removesuffix(".yaml")  # the request's own name (Shikigami checks they match)
         seen.add(app)
         try:
-            refs = kept(app, path, files.raw(path), pending, outside)
+            text = files.raw(path)
+            # D126: its environments' folders are the app's too - never "no request". Not swept yet either: what
+            # points at an environment's change entries comes with per-environment secrets.
+            seen.update(parse(text).namespaces[2:])
+            refs = kept(app, path, text, pending, outside)
             if refs is not None:
                 found += unreferenced(app, refs, outside, now)
         except READ_ERRORS:
@@ -106,7 +110,7 @@ def sweep(files: RequestFiles, outside: Outside, delete: bool, now: datetime) ->
     folders = outside.vault.folders()
     for folder in folders or []:
         app = folder.removesuffix("-build")
-        if app not in seen:  # no request names it: nothing can point at its entries
+        if app not in seen and folder not in seen:  # no request names it: nothing can point at its entries
             found += unreferenced(folder, set(), outside, now)
     deleted = []
     for entry in found:

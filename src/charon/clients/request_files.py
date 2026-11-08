@@ -25,8 +25,13 @@ class _Secret(Incoming):
     entry: str = "env"  # the OpenBao entry holding it (D123)
 
 
+class _Environment(Incoming):
+    name: str
+
+
 class _Spec(Incoming):
     removed: bool = False
+    environments: list[_Environment] = Field(default_factory=list)  # D126: each its own namespace <app>-<env>
     retention: Days = "30d"  # the same default as the request format
     secrets: list[_Secret] = Field(default_factory=list)
 
@@ -41,6 +46,18 @@ class AppRequest(Incoming):
     def retention(self) -> timedelta:
         """How long after its removal the app is kept."""
         return timedelta(days=int(self.spec.retention.removesuffix("d")))
+
+    @property
+    def namespaces(self) -> tuple[str, ...]:
+        """Every namespace the app had: its own, its build's, each environment's (D126)."""
+        name = self.metadata.name
+        return (name, f"{name}-build", *(f"{name}-{env.name}" for env in self.spec.environments))
+
+    @property
+    def applications(self) -> tuple[str, ...]:
+        """Its Argo Applications: app-<app> and each environment's env-<app>-<env> (D126)."""
+        name = self.metadata.name
+        return (f"app-{name}", *(f"env-{name}-{env.name}" for env in self.spec.environments))
 
     @property
     def entries(self) -> set[str]:

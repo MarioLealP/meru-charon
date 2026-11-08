@@ -96,9 +96,9 @@ class World:
             return httpx2.Response(200, json={"auth": {"client_token": "bao-token", "lease_duration": 600}})
         assert request.headers["X-Vault-Token"] == "bao-token"
         if request.method == "GET":
-            assert request.url.path == "/v1/apps/metadata/meru/tanuki/eso/"
+            assert request.url.path.startswith("/v1/apps/metadata/meru/tanuki")  # tanuki/eso/ or tanuki-<env>/eso/
             assert request.url.params["list"] == "true"
-            if not self.change_entries:
+            if request.url.path != "/v1/apps/metadata/meru/tanuki/eso/" or not self.change_entries:
                 return httpx2.Response(404, json={"errors": []})
             return httpx2.Response(200, json={"data": {"keys": [*self.change_entries, "sub/"]}})
         assert request.method == "DELETE"
@@ -230,7 +230,7 @@ def test_a_living_argo_application_keeps_it(world: World, caplog: pytest.LogCapt
     world.applications.add("app-tanuki")
     assert world.run(delete=True, now=AFTER_RETENTION) == 0
     assert world.deleted == []
-    assert "its Argo Application still exists" in caplog.text
+    assert "its Argo Application app-tanuki still exists" in caplog.text
 
 
 def test_a_dry_run_names_everything_in_the_way(world: World, caplog: pytest.LogCaptureFixture):
@@ -239,7 +239,7 @@ def test_a_dry_run_names_everything_in_the_way(world: World, caplog: pytest.LogC
     world.run(delete=False, now=DURING_RETENTION)
     assert "retention runs to" in caplog.text
     assert "no removed-at mark" in caplog.text
-    assert "its Argo Application still exists" in caplog.text
+    assert "its Argo Application app-tanuki still exists" in caplog.text
 
 
 def test_an_app_that_was_not_removed_is_never_looked_at(world: World):
@@ -327,7 +327,7 @@ def test_a_living_argo_application_keeps_the_volumes(world: World, caplog: pytes
     world.applications.add("app-tanuki")
     world.run(delete=False, now=AFTER_RETENTION, volumes=True)
     assert world.released == []
-    assert "its Argo Application still exists" in caplog.text
+    assert "its Argo Application app-tanuki still exists" in caplog.text
 
 
 def test_a_volume_in_use_on_the_same_folder_keeps_the_released_ones(world: World, caplog: pytest.LogCaptureFixture):
@@ -395,7 +395,7 @@ def test_a_living_argo_application_keeps_the_secrets(world: World, caplog: pytes
     world.applications.add("app-tanuki")
     world.run(delete=False, now=AFTER_RETENTION, secrets=True)
     assert world.secrets_deleted == []
-    assert "tanuki secrets: kept: its Argo Application still exists" in caplog.text
+    assert "tanuki secrets: kept: its Argo Application app-tanuki still exists" in caplog.text
 
 
 def test_an_app_that_was_not_removed_keeps_its_secrets(world: World):
@@ -548,3 +548,37 @@ def test_a_living_argo_application_keeps_the_request(world: World):
     world.applications.add("app-tanuki")
     world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True)
     assert world.proposed == []
+
+
+def with_prod(world: World) -> dict:
+    """tanuki with an environment called prod (D126): in its request, and its namespace marked like tanuki's."""
+    world.request = REQUEST.replace("  removed: true", "  environments:\n    - name: prod\n  removed: true")
+    prod = json.loads(json.dumps(world.tanuki))
+    prod["metadata"].update(name="tanuki-prod", uid="0e5b2c1a-prod-4d6e-9f00-000000000001")
+    world.namespaces["items"].append(prod)
+    return prod
+
+
+def test_an_environments_namespace_goes_with_the_app(world: World):
+    prod = with_prod(world)
+    assert world.run(delete=True, now=AFTER_RETENTION) == 0
+    assert [name for name, _ in world.deleted] == ["tanuki", "tanuki-prod"]
+    assert world.deleted[1][1] == {"preconditions": {"uid": prod["metadata"]["uid"]}}
+
+
+def test_a_living_environment_application_keeps_everything(world: World, caplog: pytest.LogCaptureFixture):
+    with_prod(world)
+    world.applications.add("env-tanuki-prod")
+    assert world.run(delete=True, now=AFTER_RETENTION) == 0
+    assert world.deleted == []
+    assert "its Argo Application env-tanuki-prod still exists" in caplog.text
+
+
+def test_an_environments_secrets_go_once_its_namespace_is_gone_too(world: World):
+    with_prod(world)
+    world.namespace_gone()
+    world.run(delete=False, now=AFTER_RETENTION, secrets=True)
+    assert world.secrets_deleted == []  # tanuki-prod still exists
+    world.namespaces["items"] = [i for i in world.namespaces["items"] if i["metadata"]["name"] != "tanuki-prod"]
+    world.run(delete=False, now=AFTER_RETENTION, secrets=True)
+    assert "/v1/apps/metadata/meru/tanuki-prod/eso/env" in world.secrets_deleted

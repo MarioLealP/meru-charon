@@ -69,14 +69,16 @@ def stamp(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def app_blockers(app: AppRequest, removed_at: datetime, argo_app: bool, now: datetime) -> list[str]:
-    """What keeps everything of this app. All of them, not the first: a dry run shows what is still in the way."""
+def app_blockers(app: AppRequest, removed_at: datetime, argo_apps: list[str], now: datetime) -> list[str]:
+    """What keeps everything of this app. All of them, not the first: a dry run shows what is still in the way.
+
+    `argo_apps`: its Applications that still exist - the app's own or an environment's (D126).
+    """
     found = []
     until = removed_at + app.retention
     if now < until:
         found.append(f"retention runs to {stamp(until)}")
-    if argo_app:
-        found.append("its Argo Application still exists")
+    found += [f"its Argo Application {name} still exists" for name in argo_apps]
     return found
 
 
@@ -101,12 +103,22 @@ def volume_blockers(volume: Volume, seen: Seen) -> list[str]:
     return found
 
 
-def secret_entries(name: str) -> list[str]:
-    """What a retired app leaves in OpenBao, the only paths Charon's policy allows."""
-    return [f"{name}/eso/env", f"{name}-build/build", f"{name}-build/eso/sindri-registration"]
+def secret_entries(name: str, environments: tuple[str, ...] = ()) -> list[str]:
+    """What a retired app leaves in OpenBao, the only paths Charon's policy allows.
+
+    `environments`: the <app>-<env> namespaces (D126) - each reads its own apps/meru/<namespace>/eso/env.
+    """
+    return [
+        f"{name}/eso/env",
+        f"{name}-build/build",
+        f"{name}-build/eso/sindri-registration",
+        *(f"{ns}/eso/env" for ns in environments),
+    ]
 
 
-def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> bool:
+def purge_secrets(
+    name: str, blocked: list[str], vault: Vault, delete: bool, environments: tuple[str, ...] = ()
+) -> bool:
     """Delete the app's OpenBao entries if nothing blocks them; with the switch off, only say so.
 
     True once they're gone. Charon can't see whether an entry exists, so that means: deleted in this pass - a delete
@@ -116,8 +128,10 @@ def purge_secrets(name: str, blocked: list[str], vault: Vault, delete: bool) -> 
         log.info("%s secrets: kept: %s", name, "; ".join(found))
         return False
     if delete:
-        changes = [f"{name}/eso/{n}" for n in vault.names(name) if n.startswith("env-")]  # D123's change entries
-        for entry in secret_entries(name) + changes:
+        changes = [  # D123's change entries, the app's and each environment's
+            f"{ns}/eso/{n}" for ns in (name, *environments) for n in vault.names(ns) if n.startswith("env-")
+        ]
+        for entry in secret_entries(name, environments) + changes:
             vault.delete(entry)
         log.info("%s secrets: deleted", name)
         return True
@@ -150,11 +164,13 @@ def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches,
     if removed_at is None:
         log.warning("%s: kept: removed, but the request has no removedAt", name)
         return False
-    owned = (name, f"{name}-build")
+    owned = app.namespaces  # the app's, its build's and each environment's (D126)
+    environments = owned[2:]
     namespaces = [seen.namespaces[n] for n in owned if n in seen.namespaces]
     volumes = [v for v in seen.volumes if v.waiting and v.claim_namespace in owned]
     cluster = outside.cluster
-    common = app_blockers(app, removed_at, cluster.has_application(name), now)
+    argo_apps = [a for a in app.applications if cluster.has_application(a)]
+    common = app_blockers(app, removed_at, argo_apps, now)
     for namespace in namespaces:
         target = namespace.metadata.name
         if found := common + namespace_blockers(namespace, removed_at):
@@ -174,7 +190,7 @@ def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches,
         else:
             log.info("%s: would release (dry run)", target)
     blocked = common + [f"namespace {n} still exists" for n in owned if n in seen.namespaces]
-    secrets_gone = purge_secrets(name, blocked, outside.vault, switches.secrets)
+    secrets_gone = purge_secrets(name, blocked, outside.vault, switches.secrets, environments)
     images_gone = purge_images(name, blocked, outside.registry, switches.images)
     if blocked:
         return False
