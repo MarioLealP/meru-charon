@@ -209,3 +209,16 @@ def test_the_report_is_written_then_replaced(world: World):
     assert world.configmap["checked-at"] == "2026-11-05T12:00:00+00:00"
     world.run(delete=True)
     assert (world.configmap["unreferenced"], world.configmap["deleted"]) == ("0", "1")
+
+
+def test_an_environments_folder_is_the_apps_and_never_swept(world: World):
+    # D126: kappa-prod/ is kappa's prod environment, not a folder without a request
+    for side in ("main", "pr"):
+        setattr(
+            world, side, getattr(world, side).replace("  secrets:", "  environments:\n    - name: prod\n  secrets:")
+        )
+    world.entries["kappa-prod"] = {"env": OLD, "env-20261101-ffffff": OLD}
+    world.may_list_folders = True
+    report, failed = world.run(delete=True)
+    assert failed == 0
+    assert not [e for e in report.unreferenced + report.deleted if e.startswith("kappa-prod/")]

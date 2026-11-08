@@ -106,9 +106,9 @@ class Cluster(BaseModel):
         response.raise_for_status()
         return _VolumeList.model_validate_json(response.content).items
 
-    def has_application(self, app: str) -> bool:
-        """Whether the app's Argo Application still exists."""
-        response = self.http.get(f"/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/app-{app}")
+    def has_application(self, name: str) -> bool:
+        """Whether this Argo Application (app-<app>, env-<app>-<env>) still exists."""
+        response = self.http.get(f"/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/{name}")
         if response.status_code == 404:
             return False
         response.raise_for_status()
