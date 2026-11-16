@@ -32,6 +32,16 @@ externalSecrets:
   gitea: {}
   zot: {}
 
+networkPolicy:
+  enabled: true # a CronJob: nobody connects in; out only to what it cleans up
+  hostAddresses: [10.42.0.1/32] # the node: the kubelet's probes and Caddy on the host (no Docker range any more)
+  egress: none
+  toNamespaces: [zot] # zot.clockmost.com is Zot's Service; the policy sees its pod
+  toAddresses:
+    # The host: Caddy (Gitea's API, GlitchTip), the Kubernetes API (kube-proxy rewrites kubernetes.default.svc to
+    # 192.168.10.110:6443 before the policy sees it) and OpenBao.
+    - { cidr: 192.168.10.110/32, ports: [443, 6443, 8204] }
+
 # Crash reports (D125): this app's GlitchTip project, which Shikigami made (it predates the marker's own DSN line).
 glitchtip:
   dsn: https://91a85a3eaa6c47d9aa7938e934930657@glitchtip.clockmost.com/2
