@@ -67,7 +67,7 @@ def run() -> int:
             cluster=Cluster(http=kubernetes),
             vault=vault,
             registry=Registry(http=zot, user=settings.zot_user, password=settings.zot_password),
-            repos=AppRepos(http=anonymous_gitea, org=settings.apps_org),
+            repos=AppRepos(http=anonymous_gitea, org=settings.apps_org, login=gitea),
             removals=Removals(
                 http=gitea,
                 gitea_url=settings.gitea_url,
