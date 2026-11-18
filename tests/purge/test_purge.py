@@ -248,11 +248,96 @@ def test_an_app_that_was_not_removed_is_never_looked_at(world: World):
     assert world.deleted == []
 
 
-def test_a_removal_without_a_date_stays(world: World, caplog: pytest.LogCaptureFixture):
+def new_style(world: World) -> None:
+    """A request without removedAt (no Xolotl stamp): the namespace mark alone is the clock."""
     world.request = "\n".join(line for line in REQUEST.splitlines() if "removedAt" not in line)
+
+
+def test_a_removal_without_a_date_is_counted_from_the_mark(world: World):
+    new_style(world)
+    assert world.run(delete=True, now=AFTER_RETENTION) == 0
+    assert [name for name, _ in world.deleted] == ["tanuki"]
+
+
+def test_a_removal_without_a_date_waits_for_the_retention_from_the_mark(world: World, caplog: pytest.LogCaptureFixture):
+    new_style(world)
+    assert world.run(delete=True, now=DURING_RETENTION) == 0
+    assert world.deleted == []
+    assert "tanuki: kept: retention runs to 2026-12-03T22:15:46Z" in caplog.text
+
+
+def test_a_removal_without_a_date_or_a_mark_stays(world: World, caplog: pytest.LogCaptureFixture):
+    new_style(world)
+    del world.tanuki["metadata"]["annotations"][REMOVED_AT]
+    assert world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True) == 0
+    assert world.deleted == []
+    assert world.secrets_deleted == []
+    assert world.images_deleted == []
+    assert world.proposed == []
+    assert "tanuki: kept: the request has no removedAt and no namespace of it has a removed-at mark" in caplog.text
+
+
+def test_an_unreadable_mark_is_no_clock(world: World, caplog: pytest.LogCaptureFixture):
+    new_style(world)
+    world.tanuki["metadata"]["annotations"][REMOVED_AT] = "yesterday"
     assert world.run(delete=True, now=AFTER_RETENTION) == 0
     assert world.deleted == []
-    assert "no removedAt" in caplog.text
+    assert "mark yesterday isn't in the" in caplog.text
+
+
+def test_a_forged_request_date_against_the_mark_keeps_everything(world: World, caplog: pytest.LogCaptureFixture):
+    world.request = REQUEST.replace("removedAt: 2026-11-03T22:15:46Z", "removedAt: 2026-01-01T00:00:00Z")
+    assert world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True) == 0
+    assert world.deleted == []
+    assert world.secrets_deleted == []
+    assert world.images_deleted == []
+    assert "tanuki: kept: mark 2026-11-03T22:15:46Z isn't the request's 2026-01-01T00:00:00Z" in caplog.text
+
+
+def test_the_build_namespaces_mark_is_found_when_the_apps_is_gone(world: World):
+    new_style(world)
+    build = json.loads(json.dumps(world.tanuki))
+    build["metadata"] |= {"name": "tanuki-build", "uid": "build-uid"}
+    world.namespaces["items"].append(build)
+    world.namespace_gone()
+    world.run(delete=True, now=DURING_RETENTION)
+    assert world.deleted == []  # the clock was found: the retention still runs
+    world.run(delete=True, now=AFTER_RETENTION)
+    assert [name for name, _ in world.deleted] == ["tanuki-build"]
+
+
+def test_an_environments_mark_is_found_when_the_app_and_build_are_gone(world: World):
+    prod = with_prod(world)
+    world.request = "\n".join(line for line in world.request.splitlines() if "removedAt" not in line)
+    world.namespace_gone()
+    world.run(delete=True, now=AFTER_RETENTION)
+    assert [name for name, _ in world.deleted] == ["tanuki-prod"]
+    assert world.deleted[0][1] == {"preconditions": {"uid": prod["metadata"]["uid"]}}
+
+
+def test_a_namespace_with_another_mark_than_the_apps_clock_stays(world: World, caplog: pytest.LogCaptureFixture):
+    new_style(world)
+    build = json.loads(json.dumps(world.tanuki))
+    build["metadata"] |= {"name": "tanuki-build", "uid": "build-uid"}
+    build["metadata"]["annotations"][REMOVED_AT] = "2026-10-01T00:00:00Z"
+    world.namespaces["items"].append(build)
+    world.run(delete=True, now=AFTER_RETENTION)
+    assert [name for name, _ in world.deleted] == ["tanuki"]
+    assert "tanuki-build: kept: mark 2026-10-01T00:00:00Z isn't the app's 2026-11-03T22:15:46Z" in caplog.text
+
+
+def test_with_every_namespace_purged_a_request_without_a_date_has_no_clock_left_to_wait_for(world: World):
+    new_style(world)
+    world.all_gone()
+    world.run(delete=True, now=DURING_RETENTION, secrets=True, images=True, removal=True)
+    assert world.proposed == [("tanuki", "apps/tanuki.yaml", world.request)]  # no mark is left to count from
+
+
+def test_the_purge_pr_is_the_same_for_a_request_without_a_date(world: World):
+    new_style(world)
+    world.all_gone()
+    world.run(delete=True, now=AFTER_RETENTION, secrets=True, images=True, removal=True)
+    assert [(app, path) for app, path, _ in world.proposed] == [("tanuki", "apps/tanuki.yaml")]
 
 
 def test_the_build_namespace_goes_with_the_same_checks(world: World):

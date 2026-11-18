@@ -1,12 +1,12 @@
 """Purge steps 1 to 4 (D109-D112): a retired app's namespaces, volumes, OpenBao entries and images.
 
-Two keys for a namespace, set by different hands: the request says when it was removed and how long to keep it, and
-Shikigami's retire pass marked the namespace with that same moment. A volume has no mark: its second key is the
-cluster's own, Released, and that the namespace it belonged to is gone - so a volume always goes at least one pass after
-its namespace. The OpenBao entries wait for both of the app's namespaces the same way: nothing in OpenBao can refuse
-Charon on a live app, these checks are the only guard. The images wait the same way, and Zot refuses Charon on a
-repository that still has its own entry. Anything goes only when every check passes, so a restore, a second retire or a
-half-done retire keeps it.
+Two keys for a namespace, set by different hands: the request says how long to keep it, and Shikigami's retire pass
+marked the namespace with the moment the retention started (a request that still carries its own removedAt must agree).
+A volume has no mark: its second key is the cluster's own, Released, and that the namespace it belonged to is gone - so
+a volume always goes at least one pass after its namespace. The OpenBao entries wait for both of the app's namespaces
+the same way: nothing in OpenBao can refuse Charon on a live app, these checks are the only guard. The images wait the
+same way, and Zot refuses Charon on a repository that still has its own entry. Anything goes only when every check
+passes, so a restore, a second retire or a half-done retire keeps it.
 
 Step 5 (removal.py): when a pass finds nothing of the app left - no namespace, no volume, the entries deleted, no image,
 the repo archived - it proposes deleting the request file.
@@ -28,6 +28,7 @@ from charon.purge.removal import ProposalFailedError, Removals
 
 log = logging.getLogger("charon")
 
+MARK_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 READ_ERRORS = (httpx2.HTTPError, ValidationError, yaml.YAMLError, ProposalFailedError)
 
 
@@ -65,29 +66,66 @@ class Seen(BaseModel):
 
 
 def stamp(moment: datetime) -> str:
-    """The mark's format: UTC, to the second, as Shikigami writes it from removedAt."""
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """The mark's format: UTC, to the second, as Shikigami writes it."""
+    return moment.astimezone(UTC).strftime(MARK_FORMAT)
 
 
-def app_blockers(app: AppRequest, removed_at: datetime, argo_apps: list[str], now: datetime) -> list[str]:
+class ClockUnknownError(Exception):
+    """The app's retention clock can't be trusted or found: keep everything of it this pass."""
+
+
+def unstamp(mark: str) -> datetime:
+    """The mark back to a moment; a value in any other format is no clock."""
+    try:
+        return datetime.strptime(mark, MARK_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        raise ClockUnknownError(f"mark {mark} isn't in the {MARK_FORMAT} format") from None
+
+
+def removal_clock(app: AppRequest, namespaces: dict[str, Namespace]) -> datetime | None:
+    """When the app's retention started: the removed-at mark on its namespaces, the request's removedAt if it has one.
+
+    Shikigami stamps the same mark on the app's, its build's and each environment's namespace, so any one left will do:
+    a pass after a partial purge still finds it. A request with its own removedAt (stamped by Xolotl) must agree with
+    the mark; one without is counted from the mark alone. Raises ClockUnknownError when there is no mark to count from
+    or it contradicts the request. None: no namespace of the app is left, so there is nothing a retention could still
+    hold, and the steps that wait for the namespaces' end (volumes, secrets, images) go on.
+    """
+    present = [namespaces[n] for n in app.namespaces if n in namespaces]
+    marked = next((ns for ns in present if ns.removed_at), None)
+    mark = marked.removed_at if marked else None
+    requested = app.metadata.removed_at
+    if requested is not None:
+        if mark is not None and mark != stamp(requested):
+            raise ClockUnknownError(f"mark {mark} isn't the request's {stamp(requested)}")
+        return requested
+    if mark is not None:
+        return unstamp(mark)
+    if present:
+        raise ClockUnknownError("the request has no removedAt and no namespace of it has a removed-at mark")
+    return None
+
+
+def app_blockers(app: AppRequest, removed_at: datetime | None, argo_apps: list[str], now: datetime) -> list[str]:
     """What keeps everything of this app. All of them, not the first: a dry run shows what is still in the way.
 
     `argo_apps`: its Applications that still exist - the app's own or an environment's (D126).
     """
     found = []
-    until = removed_at + app.retention
-    if now < until:
+    if removed_at is not None and now < (until := removed_at + app.retention):
         found.append(f"retention runs to {stamp(until)}")
     found += [f"its Argo Application {name} still exists" for name in argo_apps]
     return found
 
 
-def namespace_blockers(namespace: Namespace, removed_at: datetime) -> list[str]:
-    """What keeps this namespace: its mark has to be the request's own moment."""
+def namespace_blockers(namespace: Namespace, removed_at: datetime | None) -> list[str]:
+    """What keeps this namespace: its mark has to be the app's own moment."""
+    if removed_at is None:
+        return ["no retention clock"]
     if namespace.removed_at is None:
         return ["no removed-at mark"]
     if namespace.removed_at != stamp(removed_at):
-        return [f"mark {namespace.removed_at} isn't the request's {stamp(removed_at)}"]
+        return [f"mark {namespace.removed_at} isn't the app's {stamp(removed_at)}"]
     return []
 
 
@@ -160,9 +198,10 @@ def purge_images(name: str, blocked: list[str], registry: Registry, delete: bool
 def purge_app(app: AppRequest, outside: Outside, seen: Seen, switches: Switches, now: datetime) -> bool:
     """Take one removed app through every step, each behind its own checks and switch. True once nothing is left."""
     name = app.metadata.name
-    removed_at = app.metadata.removed_at
-    if removed_at is None:
-        log.warning("%s: kept: removed, but the request has no removedAt", name)
+    try:
+        removed_at = removal_clock(app, seen.namespaces)
+    except ClockUnknownError as error:
+        log.warning("%s: kept: %s", name, error)
         return False
     owned = app.namespaces  # the app's, its build's and each environment's (D126)
     environments = owned[2:]

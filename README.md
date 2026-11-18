@@ -4,7 +4,7 @@ Meru's purge - clears what a retired app left after its retention
 
 A Meru app, made from the [Meru/nuwa-python](https://git.clockmost.com/Meru/nuwa-python) template, turned into a
 daily job (D107): every day at 11:00 Lisbon a CronJob runs one pass and exits. An app whose request was removed more
-than its retention ago (`metadata.removedAt`, stamped by Xolotl) loses what the retire only revoked - namespaces,
+than its retention ago (the `meru.clockmost.com/removed-at` mark Shikigami stamps on its namespaces; a request that still has `metadata.removedAt` must agree) loses what the retire only revoked - namespaces,
 volumes, OpenBao entries, Zot images, runner records - and its request file goes last. Exit 0 = the pass succeeded;
 Zabbix watches the CronJob's last successful run. Shikigami never deletes (D79, D84): Charon is the only part of Meru
 that does, with credentials of its own.
